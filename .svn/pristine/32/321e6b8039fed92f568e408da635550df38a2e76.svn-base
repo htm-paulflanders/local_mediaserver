@@ -1,0 +1,189 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+defined('MOODLE_INTERNAL') || die();
+
+function xmldb_local_mediaserver_upgrade($oldversion) {
+    global $DB;
+
+    $dbman = $DB->get_manager();
+
+    if ($oldversion < 2013121300) {
+        // Changing precision of field reference on table local_mediaserver_stream to (255).
+        $table = new xmldb_table('local_mediaserver_stream');
+        $field = new xmldb_field('reference', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, 'source');
+
+        // Launch change of precision for field reference.
+        $dbman->change_field_precision($table, $field);
+
+        // Mediaserver savepoint reached.
+        upgrade_plugin_savepoint(true, 2013121300, 'local', 'mediaserver');
+    }
+
+    if ($oldversion < 2014020501) {
+        // Define field category to be added to local_mediaserver_channel.
+        $table = new xmldb_table('local_mediaserver_channel');
+        $field = new xmldb_field('category', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, 0, 'datafile');
+
+        // Conditionally launch add field category.
+        if (! $dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Mediaserver savepoint reached.
+        upgrade_plugin_savepoint(true, 2014020501, 'local', 'mediaserver');
+    }
+
+    if ($oldversion < 2014020502) {
+        // Define field icon to be added to local_mediaserver_channel.
+        $table = new xmldb_table('local_mediaserver_channel');
+        $field = new xmldb_field('icon', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null, null, 'datafile');
+
+        // Conditionally launch add field icon.
+        if (! $dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Mediaserver savepoint reached.
+        upgrade_plugin_savepoint(true, 2014020502, 'local', 'mediaserver');
+    }
+
+    if ($oldversion < 2014031100) {
+        // Rename field category on table local_mediaserver_program to genre.
+        $table = new xmldb_table('local_mediaserver_program');
+        $field = new xmldb_field('category', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null, null, 'episodetitle');
+
+        // Launch rename field category.
+        $dbman->rename_field($table, $field, 'genre');
+
+        // Mediaserver savepoint reached.
+        upgrade_plugin_savepoint(true, 2014031100, 'local', 'mediaserver');
+    }
+
+    if ($oldversion < 2014031200) {
+        $table = new xmldb_table('local_mediaserver_category');
+
+        // Define index name_parent (unique) to be dropped form local_mediaserver_category.
+        $index = new xmldb_index('name_parent', XMLDB_INDEX_UNIQUE, array('name', 'parent'));
+        if ($dbman->index_exists($table, $index)) {
+            $dbman->drop_index($table, $index);
+        }
+
+        // Define index parent (not unique) to be dropped form local_mediaserver_category.
+        $index = new xmldb_index('parent', XMLDB_INDEX_NOTUNIQUE, array('parent'));
+        if ($dbman->index_exists($table, $index)) {
+            $dbman->drop_index($table, $index);
+        }
+
+        // Define field parent to be dropped from local_mediaserver_category.
+        $field = new xmldb_field('parent');
+        if ($dbman->field_exists($table, $field)) {
+            $dbman->drop_field($table, $field);
+        }
+
+        // Define field name to be added to local_mediaserver_category.
+        $field = new xmldb_field('path', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, 'name');
+        if (! $dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Define index parent (not unique) to be added to local_mediaserver_category.
+        $index = new xmldb_index('path', XMLDB_INDEX_NOTUNIQUE, array('path'));
+        if (! $dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+
+        // Mediaserver savepoint reached.
+        upgrade_plugin_savepoint(true, 2014031200, 'local', 'mediaserver');
+    }
+
+    if ($oldversion < 2014033100) {
+        // Define key channel (foreign) to be added to local_mediaserver_program.
+        $table = new xmldb_table('local_mediaserver_program');
+        $key = new xmldb_key('channel', XMLDB_KEY_FOREIGN, array('channel'), 'local_mediaserver_channel', array('id'));
+
+        // Launch add key channel.
+        $dbman->add_key($table, $key);
+
+        // Mediaserver savepoint reached.
+        upgrade_plugin_savepoint(true, 2014033100, 'local', 'mediaserver');
+    }
+
+    if ($oldversion < 2014033101) {
+        // Define index genre (not unique) to be dropped from local_mediaserver_program.
+        $table = new xmldb_table('local_mediaserver_program');
+        $index = new xmldb_index('genre', XMLDB_INDEX_NOTUNIQUE, array('genre'));
+
+        // Conditionally launch drop index genre.
+        if ($dbman->index_exists($table, $index)) {
+            $dbman->drop_index($table, $index);
+        }
+
+        // Mediaserver savepoint reached.
+        upgrade_plugin_savepoint(true, 2014033101, 'local', 'mediaserver');
+    }
+
+    if ($oldversion < 2014040100) {
+        // Define field category to be dropped from local_mediaserver_channel.
+        $table = new xmldb_table('local_mediaserver_channel');
+        $field = new xmldb_field('category');
+
+        // Conditionally launch drop field category.
+        if ($dbman->field_exists($table, $field)) {
+            $dbman->drop_field($table, $field);
+        }
+
+        // Mediaserver savepoint reached.
+        upgrade_plugin_savepoint(true, 2014040100, 'local', 'mediaserver');
+    }
+
+    if ($oldversion < 2014040700) {
+        // Define field sortorder to be added to local_mediaserver_channel.
+        $table = new xmldb_table('local_mediaserver_channel');
+        $field = new xmldb_field('sortorder', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null, 'name');
+
+        // Conditionally launch add field sortorder.
+        if (! $dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Mediaserver savepoint reached.
+        upgrade_plugin_savepoint(true, 2014040700, 'local', 'mediaserver');
+    }
+
+    if ($oldversion < 2014070700) {
+        // Define field finished to be added to local_mediaserver_series.
+        $table = new xmldb_table('local_mediaserver_series');
+        $field = new xmldb_field('finished', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, null, 'format');
+
+        // Conditionally launch add field finished.
+        if (! $dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Mediaserver savepoint reached.
+        upgrade_plugin_savepoint(true, 2014070700, 'local', 'mediaserver');
+    }
+
+    return true;
+}

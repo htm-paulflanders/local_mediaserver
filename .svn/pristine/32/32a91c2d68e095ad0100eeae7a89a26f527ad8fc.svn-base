@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<COMPATIBILITY_MATRIX>
+  <MOODLE version="2.7">
+    <CUSTOM_CHECKS>
+      <CUSTOM_CHECK file="local/mediaserver/lib.php" function="local_mediaserver_environment_rss" level="optional">
+        <FEEDBACK>
+          <ON_CHECK message="configenablerssfeedsdisabled2" />
+        </FEEDBACK>
+      </CUSTOM_CHECK>
+    </CUSTOM_CHECKS>
+  </MOODLE>
+</COMPATIBILITY_MATRIX>

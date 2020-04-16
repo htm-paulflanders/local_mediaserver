@@ -1,0 +1,372 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+defined('MOODLE_INTERNAL') || die();
+
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+class local_mediaserver_guide_renderer extends plugin_renderer_base {
+    /** @const BLOCK_REGION Block region on page. */
+    const BLOCK_REGION = BLOCK_POS_RIGHT;
+    /** @const HOUR_PIXELS Width in pixels of an hour */
+    const HOURPIXELS = 190;
+
+    /**
+     * Add a block region to the page
+     *
+     * @return void
+     */
+    public function add_block_region() {
+        global $PAGE;
+
+        $PAGE->blocks->add_region(self::BLOCK_REGION);
+    }
+
+    /**
+     * Add fake block to the page
+     *
+     * @param block_contents $block
+     * @return void
+     */
+    public function add_block(block_contents $block) {
+        global $PAGE;
+
+        // Auto-populate the $block id attribute.
+        $blockclass = explode('\\', get_class($block));
+        $block->attributes['id'] = 'block_fake_' . $blockclass[2];
+
+        $PAGE->blocks->add_fake_block($block, self::BLOCK_REGION);
+    }
+
+    /**
+     * Get the HTML for blocks in the block region
+     *
+     * @return string
+     */
+    public function output_blocks() {
+        global $OUTPUT;
+
+        return $OUTPUT->blocks(self::BLOCK_REGION, 'row-fluid span3');
+    }
+
+    /**
+     * Return opening tags to begin the main page region
+     *
+     * @return string
+     */
+    public function start_main_region() {
+        return html_writer::start_tag('div', array('id' => 'guide-region-main', 'class' => 'span9'));
+    }
+
+    /**
+     * Return HTML content to print channel programs in grid form
+     *
+     * @param int $timebegin
+     * @return string
+     */
+    public function output_times($timebegin) {
+        global $PAGE;
+
+        $link = clone($PAGE->url);
+
+        // The current range of time we're looking at.
+        $timehour = date('H', $timebegin);
+        $selected = range($timehour, $timehour + 3);
+
+        $date = usergetdate($timebegin);
+        list($day, $month, $year) = array($date['mday'], $date['mon'], $date['year']);
+
+        foreach (range(0, 23) as $hour) {
+            $link->param('t', mktime($hour, 0, 0, $month, $day, $year));
+
+            $class = (in_array($hour, $selected) ? 'hour-selected' : '');
+
+            $list[] = html_writer::link($link, sprintf('%02d', $hour), array('class' => $class));
+        }
+
+        return html_writer::alist($list, array('class' => 'guide-row guide-time'));
+    }
+
+    /**
+     * Return HTML content to print channel programs in grid form
+     *
+     * @param stdClass $channel
+     * @param array $programs
+     * @param int $timebegin
+     * @param int $timeend
+     * @return string
+     */
+    public function output_channel_programs(stdClass $channel, array $programs, $timebegin, $timeend) {
+        $context = context_system::instance();
+
+        $now = time();
+        $strtimeformat = get_string('strftimetime', 'langconfig');
+
+        $output = html_writer::start_tag('ul', array('class' => 'guide-row guide-channel'));
+
+        $link = new local_mediaserver_url('/local/mediaserver/guide/channel.php', array('id' => $channel->id, 't' => $timebegin));
+        $iconlink = html_writer::link($link, local_mediaserver_channel_icon($channel));
+
+        $output .= html_writer::tag('li', $iconlink, array('class' => 'icon'));
+
+        foreach ($programs as $program) {
+            // Make sure program start/end times fall within range.
+            $programbegin = max($program->timebegin, $timebegin);
+            $programend   = min($program->timeend, $timeend);
+
+            // Program begin is in seconds; first calculate $starthour, then multiply by HOURPIXELS.
+            $starthours = ($programbegin - $timebegin) / HOURSECS;
+            $left = floor($starthours * self::HOURPIXELS) + 50; // Account for icon width.
+
+            // Duration is in seconds; we need to calculate hours and multiply by HOURPIXELS.
+            $durationhours = ($programend - $programbegin) / HOURSECS;
+            $width = floor($durationhours * self::HOURPIXELS) - 8; // Account for element padding.
+
+            // Store program classes (i.e. tiny, old, recorded, favourite, etc).
+            $classes = array();
+
+            if ($program->timebegin < ($now + LOCAL_MEDIASERVER_RECORD_BUFFER)) {
+                $classes[] = 'program-old';
+            }
+
+            if ($program->stream) {
+                $classes[] = 'program-recorded';
+            } else if ($program->favourite) {
+                $classes[] = 'program-favourite';
+            } else if ($program->serieslink) {
+                $classes[] = 'program-series';
+            }
+
+            // Workaround for programs with a negative width, remove element padding.
+            if ($width < 0) {
+                $width += 8;
+                $classes[] = 'program-tiny';
+            }
+
+            $link->param('t', $program->timebegin);
+            $link->set_anchor('p' . $program->id);
+
+            $strtime = local_mediaserver_program_time($program->timebegin, $strtimeformat);
+            $strtime .= ' (' . format_time($program->timeend - $program->timebegin) . ')';
+
+            $content = html_writer::link($link, $program->title, array('data-time' => $strtime, 'data-description' => $program->description));
+
+            $style = sprintf('left: %dpx; width: %dpx;', $left, $width);
+
+            $output .= html_writer::tag('li', $content, array('style' => $style, 'class' => implode(' ', $classes)));
+        }
+
+        $output .= html_writer::end_tag('ul');
+
+        return $output;
+    }
+
+    /**
+     * Highlights search terms in a string
+     *
+     * @param string $string
+     * @param array $searchterms
+     * @return string
+     */
+    private function highlight_search($string, array $searchterms) {
+        $replacement = \html_writer::tag('span', '$1', array('class' => 'search-match'));
+
+        return preg_replace($searchterms, $replacement, $string);
+    }
+
+    /**
+     * Return array of actions user can perform on a program
+     *
+     * @param stdClass $program
+     * @return array
+     */
+    public function get_program_actions(stdClass $program) {
+        global $PAGE, $OUTPUT, $USER, $DB;
+
+        $context = context_system::instance();
+
+        $returnurl = $PAGE->url->out_as_local_url(false);
+        $buttons = array();
+
+        // Record program.
+        if (has_capability('local/mediaserver:add', $context)) {
+            // Program must start after this time if we are to schedule/cancel recording.
+            $recordingwindow = time() + LOCAL_MEDIASERVER_RECORD_BUFFER;
+            // Flag whether we add a recording button.
+            $recordingbutton = false;
+            // Program can be series linked if it has series information, and isn't already linked.
+            $serieslinkable = (! $program->serieslink && local_mediaserver_program_has_series($program));
+
+            if ($program->timebegin > $recordingwindow) {
+                // Already scheduled, allow user to cancel their own recordings (admin can cancel any).
+                if ($program->stream) {
+                    $stream = $DB->get_record('local_mediaserver_stream', array('id' => $program->stream), '*', MUST_EXIST);
+
+                    if ($stream->userid == $USER->id || has_capability('moodle/site:config', $context)) {
+                        $cancel = new local_mediaserver_url('/local/mediaserver/guide/record.php', array(
+                            'id' => $program->id, 'returnurl' => $returnurl, 'unschedule' => 1
+                        ));
+
+                        $buttons[] = $OUTPUT->single_button($cancel, get_string('cancel'));
+                    }
+                } else if ($recordingbutton = (local_mediaserver_program_tuner($program) !== false)) {
+                    $record = new local_mediaserver_url('/local/mediaserver/guide/record.php', array(
+                        'id' => $program->id, 'returnurl' => $returnurl,
+                    ));
+
+                    $buttons[] = $OUTPUT->single_button($record, get_string('record', 'local_mediaserver'));
+                }
+            }
+
+            if (! $recordingbutton && $serieslinkable) {
+                $series = new local_mediaserver_url('/local/mediaserver/guide/series.php', array(
+                    'id' => $program->id, 'returnurl' => $returnurl,
+                ));
+
+                $buttons[] = $OUTPUT->single_button($series, get_string('recordseries', 'local_mediaserver'));
+            }
+        }
+
+        // Add program to favourites.
+        if (! $program->favourite) {
+            $favourite = new local_mediaserver_url('/local/mediaserver/guide/favourite.php', array(
+                'id' => $program->id, 'returnurl' => $returnurl,
+            ));
+
+            $buttons[] = $OUTPUT->single_button($favourite, get_string('favourite', 'local_mediaserver'));
+        }
+
+        // Find more programs with same title.
+        $search = new local_mediaserver_url('/local/mediaserver/guide/search.php', array(
+            '_qf__local_mediaserver\form\guide_search' => 1,
+            'search' => '"' . $program->title . '"',
+            'timeenddisable' => 1,
+        ));
+        $buttons[] = $OUTPUT->single_button($search, get_string('search'));
+
+        return $buttons;
+    }
+
+    /**
+     * Return HTML content to print individual program
+     *
+     * @param stdClass $program
+     * @param int $time to use for link back to channel
+     * @param array|null $searchterms search_parser returned terms
+     * @return string
+     */
+    public function output_program(stdClass $program, $time, array $searchterms = null) {
+        global $DB;
+
+        $searchterms = (array)$searchterms;
+
+        $channel = $DB->get_field('local_mediaserver_channel', 'name', array('id' => $program->channel), MUST_EXIST);
+        $channelurl = new local_mediaserver_url('/local/mediaserver/guide/channel.php', array('id' => $program->channel, 't' => $time), 'p' . $program->id);
+
+        $strdate = local_mediaserver_program_time($program->timebegin);
+        $strdate .= ' (' . format_time($program->timeend - $program->timebegin) . ')';
+
+        // The series string could contain series/episode info and/or episodetitle, just episodetitle, or nothing.
+        $strseries = '';
+        if ($program->series) {
+            $a = new object;
+            $a->series = $program->series;
+            $a->episode = $program->episode;
+
+            $strseries = get_string('seriesinfo', 'local_mediaserver', $a);
+        }
+
+        if ($program->episodetitle) {
+            if ($strseries) {
+                $strseries .= ': ' . $this->highlight_search($program->episodetitle, $searchterms);
+            } else {
+                $strseries = $this->highlight_search($program->episodetitle, $searchterms);
+            }
+        }
+
+        // Store program classes (i.e. tiny, old, recorded, favourite, etc).
+        $classes = array('program');
+
+        if ($program->timebegin < (time() + LOCAL_MEDIASERVER_RECORD_BUFFER)) {
+            $classes[] = 'program-old';
+        }
+
+        $iconlink = '';
+
+        if ($program->stream) {
+            $classes[] = 'program-recorded';
+
+            // Check if program stream is complete.
+            if ($stream = $DB->get_record('local_mediaserver_stream', array('id' => $program->stream, 'done' => 1))) {
+                $link = local_mediaserver_stream_url($stream);
+                $iconlink = html_writer::link($link, local_mediaserver_stream_image($stream, 'f2'));
+            }
+        } else if ($program->favourite) {
+            $classes[] = 'program-favourite';
+        } else if ($program->serieslink) {
+            $classes[] = 'program-series';
+        }
+
+        $title = $this->highlight_search($program->title, $searchterms);
+
+        $output  = html_writer::start_tag('div', array('class' => implode(' ', $classes)));
+        $output .= html_writer::tag('div', $title, array('id' => 'p' . $program->id, 'class' => 'title'));
+
+        $output .= $iconlink;
+
+        $list = array(
+            get_string('channel', 'local_mediaserver') . ': ' . html_writer::link($channelurl, $channel),
+            get_string('date') . ': ' . $strdate,
+            get_string('genre', 'local_mediaserver') . ': ' . $program->genre,
+        );
+
+        $output .= html_writer::alist($list, array('class' => 'program-info'));
+
+        if ($strseries) {
+            $output .= html_writer::tag('div', $strseries, array('class' => 'series'));
+        }
+
+        $description = $this->highlight_search($program->description, $searchterms);
+
+        $output .= html_writer::tag('div', $description, array('class' => 'program-description'));
+
+        // Program action buttons (record, favourite, etc).
+        if ($buttons = $this->get_program_actions($program)) {
+            $output .= html_writer::alist($buttons, array('class' => 'program-actions'));
+        }
+
+        $output .= html_writer::end_tag('div');
+
+        return $output;
+    }
+
+    /**
+     * Close the main page region
+     *
+     * @return string
+     */
+    public function end_main_region() {
+        return html_writer::end_tag('div');
+    }
+
+}

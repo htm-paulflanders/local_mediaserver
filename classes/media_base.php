@@ -1,0 +1,71 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id: media_base.php 4360 2016-07-29 10:55:39Z pholden $
+ */
+
+namespace local_mediaserver;
+
+defined('MOODLE_INTERNAL') || die();
+
+/**
+ * Base class that defines the interface for all sub-plugins
+ *
+ */
+abstract class media_base {
+    /** @var string full component name. */
+    protected $component;
+
+    /** @var string sub-plugin name. */
+    protected $subplugin;
+
+    /**
+     * Class constructor
+     *
+     */
+    public function __construct() {
+        // Will contain full classname, i.e. 'mediasource_foo\definition'.
+        $classnamespace = get_called_class();
+
+        // Extract the component from the root namespace.
+        preg_match('/^[^\\\\]+/', $classnamespace, $matches);
+
+        $this->component = $matches[0];
+        $this->subplugin = \core_component::normalize_component($this->component)[1];
+    }
+
+    /**
+     * Return full name of component from language file
+     *
+     * @return string
+     */
+    final public function get_name() {
+        return get_string('pluginname', $this->component);
+    }
+
+    /**
+     * Return icon object for component
+     *
+     * @return \pix_icon
+     */
+    final public function get_icon() {
+        return new \pix_icon('icon', $this->get_name(), $this->component, array('class' => 'icon'));
+    }
+}

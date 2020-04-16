@@ -1,0 +1,89 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id: rsslib.php 3909 2015-10-15 09:28:47Z pholden $
+ */
+
+require_once($CFG->libdir . '/rsslib.php');
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+/**
+ * Returns the path to the cached RSS feed contents. Creates/updates the cache if necessary.
+ *
+ * @param context $context
+ * @param array $args Arguments received in the URL
+ * @return string|null Full path to the feed or null if there is a problem
+ */
+function mediaserver_rss_get_feed(context $context, array $args) {
+    global $CFG, $DB;
+
+    if ($context->contextlevel != CONTEXT_SYSTEM) {
+        return null;
+    }
+
+    require_capability('local/mediaserver:view', $context);
+
+    $id = clean_param($args[3], PARAM_INT);
+    $stream = $DB->get_record('local_mediaserver_stream', array('id' => $id, 'done' => 1), '*', MUST_EXIST);
+
+    $filename = rss_get_file_name($stream, $stream->id);
+    $cachedfilepath = rss_get_file_full_name('local_mediaserver', $filename);
+
+    // File is cached by browsers for one hour, but is unlikely to have changed in the meantime so use a longer duration here.
+    $cacheexpirytime = (time() - DAYSECS);
+    if (file_exists($cachedfilepath)) {
+        $cachedfilelastmodified = filemtime($cachedfilepath);
+    } else {
+        $cachedfilelastmodified = 0;
+    }
+
+    // If file doesn't exist, or the cached version has expired, we need to recreate it.
+    if ($cachedfilelastmodified == 0 || $cacheexpirytime > $cachedfilelastmodified) {
+        $site = get_site();
+
+        $frame = local_mediaserver_stream_frame($stream->id);
+        $path = local_mediaserver_stream_path($stream);
+
+        $rss  = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+        $rss .= "<rss version=\"2.0\" xmlns:media=\"http://search.yahoo.com/mrss/\" xmlns:fp=\"http://flowplayer.org/fprss/\">\n";
+
+        // Channel information.
+        $rss .= rss_start_tag('channel', 1, true);
+        $rss .= rss_full_tag('title', 2, false, format_string($site->fullname));
+        $rss .= rss_full_tag('link', 2, false, $CFG->wwwroot);
+        $rss .= rss_full_tag('description', 2, false, $site->summary);
+        $rss .= rss_full_tag('generator', 2, false, get_string('pluginname', 'local_mediaserver'));
+
+        // Playlist item.
+        $rss .= rss_start_tag('item', 2, true);
+        $rss .= rss_full_tag('title', 3, false, $stream->title);
+        $rss .= rss_full_tag('media:content', 3, false, null, array('url' => $path));
+        $rss .= rss_full_tag('media:thumbnail', 3, false, null, array('url' => $frame));
+        $rss .= rss_full_tag('fp:thumbnail', 3, false, null, array('scaling' => 'fit'));
+        $rss .= rss_end_tag('item', 2, true);
+
+        $rss .= rss_end_tag('channel', 1, true);
+        $rss .= '</rss>';
+
+        rss_save_file('local_mediaserver', $filename, $rss);
+    }
+
+    return $cachedfilepath;
+}

@@ -1,0 +1,114 @@
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+define(['jquery', 'core/config'], function($, config) {
+
+    /** Element selectors. */
+    var SELECTORS = {
+        POPUP:  '[data-role="calendar-popup"]',
+        MONTH:  'select[name="monthselect"] option:checked',
+        YEAR:   'select[name="yearselect"] option:checked',
+        BUTTON: 'input[type="button"]'
+    };
+
+    /** The popup element. */
+    var popup = null;
+
+    /** Expression for matching URL timestamp. */
+    var urltimestamp = /([?&]t=)[\d]+/i;
+
+    /**
+     * Toggle the popup view state
+     *
+     * @method popupToggle
+     * @private
+     * @param {Event} event
+     */
+    var popupToggle = function(event) {
+        var offset = $(event.target).offset();
+
+        event.preventDefault();
+
+        popup.css({ left: offset.left - 100, top: offset.top + 20 });
+        popup.toggle();
+
+        // Make sure event doesn't bubble up the chain and get caught by the body.click handler.
+        event.stopPropagation();
+    };
+
+    /**
+     * Close the popup
+     *
+     * @method popupClose
+     * @private
+     * @param {Event} event
+     */
+    var popupClose = function(event) {
+        var target = $(event.target);
+
+        // Ignore clicks on popup itself.
+        if (target.closest(SELECTORS.POPUP).length !== 0) {
+            return;
+        }
+
+        popup.hide();
+    };
+
+    /**
+     * Submit the popup
+     *
+     * @method popupSubmit
+     * @private
+     * @param {Event} event
+     */
+    var popupSubmit = function(event) {
+        // Calculate selected date.
+        var month = popup.find(SELECTORS.MONTH).val(),
+            year = popup.find(SELECTORS.YEAR).val(),
+            date = new Date(year, month - 1, 1),
+            time = Math.round(date.getTime() / 1000),
+            url = event.data.value;
+
+        event.preventDefault();
+
+        // Replace time argument in current URL.
+        window.location.href = config.wwwroot + url.replace(urltimestamp, '$1' + time);
+    };
+
+    return /** @alias module:local_mediaserver/calendar */ {
+        // Public variables and functions.
+        /**
+         * Initialize calendar popup element
+         *
+         * @method init
+         * @param {String} anchor
+         * @param {String} url
+         */
+        init: function(anchor, url) {
+            $('#' + anchor).on('click', popupToggle);
+            $('body').on('click', popupClose);
+
+            popup = $(SELECTORS.POPUP);
+            popup.find(SELECTORS.BUTTON).on('click', { value: url }, popupSubmit);
+        }
+    };
+});

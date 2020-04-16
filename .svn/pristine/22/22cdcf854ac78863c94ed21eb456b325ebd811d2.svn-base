@@ -1,0 +1,129 @@
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+define(['jquery', 'core/templates', 'core/notification'],
+        function($, Templates, Notification) {
+
+    /** Element selectors. */
+    var SELECTORS = {
+        PROGRAMS: '.guide-channel li:not(.icon) a',
+        POPUP: 'program-popup',
+        POPUPCONTENT: '[data-region="popup-content"]'
+    };
+
+    /** Element classes. */
+    var CSS = {
+        POPUP: 'small-text'
+    };
+
+    /** Element templates. */
+    var TEMPLATES = {
+        POPUP: 'local_mediaserver/popup'
+    };
+
+    /** The hover popup element. */
+    var popup = null;
+
+    /** Delay for showing popup element. */
+    var popupDelay = 200;
+
+    /**
+     * Program hover event handler
+     *
+     * @method programHover
+     * @private
+     * @param {Event} event
+     */
+    var programHover = function(event) {
+        var target = $(event.target),
+            offset = target.offset(),
+            program = target.data('program');
+
+        Templates.render(TEMPLATES.POPUP, program).then(function(html, js) {
+            Templates.replaceNode(popup.find(SELECTORS.POPUPCONTENT), html, js);
+
+            popup.css({left: offset.left + 10, top: offset.top + 16});
+            popup.clearQueue().delay(popupDelay).fadeIn(popupDelay, function() {
+                popup.animate({scrollTop: 0}, popupDelay);
+            });
+
+            return;
+        }).catch(Notification.exception);
+    };
+
+    /**
+     * Program leave event handler
+     *
+     * @method programLeave
+     * @private
+     * @param {Event} event
+     */
+    var programLeave = function(event) {
+        var coordinates = {left: event.pageX, top: event.pageY},
+            region = popup.offset();
+
+        // Don't hide popup if event coodinates intersect it's region.
+        if (coordinates.left >= region.left && coordinates.left <= region.left + popup.width() &&
+                coordinates.top >= region.top && coordinates.top <= region.top + popup.height()) {
+
+            event.preventDefault();
+
+            return;
+        }
+
+        popup.clearQueue().delay(popupDelay).fadeOut(popupDelay);
+    };
+
+    return /** @alias module:local_mediaserver/guide */ {
+        // Public variables and functions.
+        /**
+         * Initialize popup element and bind hover event to all program elements
+         *
+         * @method init
+         * @private
+         * @param {String} selector
+         */
+        init: function(selector) {
+            // Test whether the popup has already been created.
+            popup = $('#' + SELECTORS.POPUP);
+
+            if (popup.length === 0) {
+                Templates.render(TEMPLATES.POPUP, {}).then(function(html, js) {
+                    Templates.runTemplateJS(js);
+
+                    popup = $('<div />').attr({
+                        id: SELECTORS.POPUP,
+                        hidden: 'hidden'
+                    }).addClass(CSS.POPUP).append(html);
+                    popup.on('mouseleave', programLeave);
+
+                    $('body').append(popup);
+
+                    return;
+                }).catch(Notification.exception);
+            }
+
+            selector = selector || SELECTORS.PROGRAMS;
+            $(selector).hover(programHover, programLeave);
+        }
+    };
+});

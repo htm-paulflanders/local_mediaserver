@@ -1,0 +1,85 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+defined('MOODLE_INTERNAL') || die();
+
+use local_mediaserver\phpunit\schedule_download_testcase,
+    mediaschedule_direct\definition;
+
+/**
+ * Unit test for Schedules Direct schedule download methods
+ *
+ * @group greenhead
+ * @group local_mediaserver
+ */
+class mediaschedule_direct_download_testcase extends schedule_download_testcase {
+
+    /**
+     * Tests schedule download method using fixtures data
+     *
+     * @return void
+     */
+    public function test_download() {
+        $schedule = __DIR__ . '/fixtures/17155.json';
+        $this->assertFileExists($schedule);
+        $schedulejson = json_decode(file_get_contents($schedule), true);
+
+        $programs = __DIR__ . '/fixtures/programs.json';
+        $this->assertFileExists($programs);
+        $programsjson = json_decode(file_get_contents($programs), true);
+
+        // Create schedule class mocking each of the request methods.
+        $schedule = $this->mockScheduleInstance(definition::class, array(
+            'request_token'    => ['token' => 'foobar'],
+            'request_schedule' => $schedulejson,
+            'request_programs' => $programsjson,
+        ));
+
+        // The schedule fixture contains a whole day listings, so needs to be filtered for $start/$finish time.
+        $start = 1465578000; // 10/06/16 18:00 BST.
+        $schedule->download(null, $start, $start + (HOURSECS * 6));
+
+        $programs = $this->getSchedulePrograms($schedule);
+        $this->assertCount(7, $programs);
+
+        $expected = array(
+            1465578000 => ['The Simpsons', 23, 22, 'Lisa Goes Gaga'],
+            1465579800 => ['Hollyoaks', 0, 0, ''],
+            1465581600 => ['Channel 4 News', 0, 0, ''],
+            1465583400 => ['Eating Well with Hemsley & Hemsley', 1, 5, ''],
+            1465585200 => ['Grand Designs', 15, 6, ''],
+            1465588800 => ['Gogglebox', 7, 17, ''],
+            1465592400 => ['The Last Leg', 8, 1, ''],
+        );
+
+        foreach ($expected as $timebegin => list($title, $series, $episode, $episodetitle)) {
+            $program = array_shift($programs);
+
+            $this->assertEquals($timebegin, $program->timebegin);
+            $this->assertEquals($title, $program->title);
+            $this->assertEquals($series, $program->series);
+            $this->assertEquals($episode, $program->episode);
+            $this->assertEquals($episodetitle, $program->episodetitle);
+        }
+    }
+}

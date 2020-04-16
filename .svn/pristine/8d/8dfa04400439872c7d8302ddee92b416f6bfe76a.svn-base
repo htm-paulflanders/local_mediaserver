@@ -1,0 +1,104 @@
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+M.local_mediaserver = M.local_mediaserver || {};
+
+var CALENDAR_NAME = 'Calendar',
+    CALENDAR;
+
+CALENDAR = function() {
+    CALENDAR.superclass.constructor.apply(this, arguments);
+};
+
+Y.extend(CALENDAR, Y.Base, {
+    /** Element selectors. */
+    SELECTORS: {
+        ICON:   '#calendar-popup-link',
+        POPUP:  '#calendar-popup-container',
+        MONTH:  'select[name="monthselect"] option:checked',
+        YEAR:   'select[name="yearselect"] option:checked',
+        SUBMIT: '#calendar-popup-button'
+    },
+
+    /** The popup element. */
+    popup: null,
+
+    /** Expression for matching URL timestamp. */
+    expression: /([?&]t=)[\d]+/i,
+
+    /** Initialize calendar UI. */
+    initializer: function() {
+        this.popup = Y.one(this.SELECTORS.POPUP);
+
+        Y.on('click', this.toggle, this.SELECTORS.ICON, this);
+        Y.on('click', this.submit, this.SELECTORS.SUBMIT, this);
+
+        Y.one('body').on('click', this.close, this);
+    },
+
+    /** Toggle the popup view state. */
+    toggle: function(event) {
+        var xy = event.target.getXY();
+
+        event.halt();
+
+        this.popup.setStyle('left', xy[0] - 100);
+        this.popup.setStyle('top', xy[1] + 20);
+        this.popup.toggleView();
+    },
+
+    /** Close the popup. */
+    close: function(event) {
+        // Ignore clicks on popup itself.
+        if (event.target.ancestor(this.SELECTORS.POPUP, true)) {
+            return;
+        }
+
+        this.popup.hide();
+    },
+
+    /** Button submission event. */
+    submit: function(event) {
+        event.halt();
+
+        // Calculate selected date.
+        var month = this.popup.one(this.SELECTORS.MONTH).getAttribute('value'),
+            year = this.popup.one(this.SELECTORS.YEAR).getAttribute('value'),
+            date = new Date(year, month - 1, 1),
+            timestamp = Math.round(date.getTime() / 1000),
+            href = window.location.href.split('#')[0];
+
+        // If argument already exists in URL replace it, otherwise set it.
+        if (href.search(this.expression) > -1) {
+            window.location.href = href.replace(this.expression, '$1' + timestamp);
+        } else {
+            window.location.href = href + '?t=' + timestamp;
+        }
+    }
+}, {
+    NAME: CALENDAR_NAME,
+    ATTRS: {}
+});
+
+M.local_mediaserver.calendar = function(config) {
+    return new CALENDAR(config);
+};

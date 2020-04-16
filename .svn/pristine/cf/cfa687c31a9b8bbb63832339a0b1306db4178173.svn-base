@@ -1,0 +1,23 @@
+{
+    "moodle-local_mediaserver-guide": {
+        "requires": [
+            "base",
+            "node",
+            "node-event-delegate",
+            "event-hover"
+        ]
+    },
+    "moodle-local_mediaserver-series": {
+        "requires": [
+            "base",
+            "node",
+            "node-event-delegate",
+            "io"
+        ]
+    },
+    "moodle-local_mediaserver-today": {
+        "requires": [
+            "moodle-local_mediaserver-guide"
+        ]
+    }
+}

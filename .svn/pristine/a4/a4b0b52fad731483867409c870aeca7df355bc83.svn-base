@@ -1,0 +1,128 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+require(dirname(dirname(dirname(__FILE__))) . '/config.php');
+require_once($CFG->dirroot . '/local/mediaserver/lib.php');
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+$id = required_param('id', PARAM_INT);
+$title = optional_param('title', '', PARAM_ALPHANUMEXT);
+
+$context = context_system::instance();
+
+require_login(SITEID, false);
+require_capability('local/mediaserver:view', $context);
+
+$stream = $DB->get_record('local_mediaserver_stream', array('id' => $id, 'done' => 1), '*', MUST_EXIST);
+$title = $stream->title;
+
+$PAGE->set_context($context);
+$PAGE->set_pagelayout('standard');
+$PAGE->set_pagetype('media-view');
+$PAGE->set_url(local_mediaserver_stream_url($stream));
+$PAGE->set_title(get_string('pluginname', 'local_mediaserver') . ': ' . $title);
+
+$action = new local_mediaserver_url('/local/mediaserver/search.php');
+$PAGE->set_button(local_mediaserver_search_form($action));
+
+navigation_node::override_active_url(new local_mediaserver_url('/local/mediaserver/index.php'));
+
+// Populate navigation breadcrumbs.
+$category = $DB->get_record('local_mediaserver_category', array('id' => $stream->category), '*', MUST_EXIST);
+
+$parents = local_mediaserver_category_breadcrumbs($category);
+foreach ($parents as $parent) {
+    $PAGE->navbar->add($parent->name, new local_mediaserver_url('/local/mediaserver/index.php', array('id' => $parent->id)));
+}
+
+// Administration block settings.
+if (local_mediaserver_user_can_edit($stream)) {
+    $container = $PAGE->settingsnav->add($stream->title, null, navigation_node::TYPE_CONTAINER);
+    $container->add(get_string('editsettings'), new local_mediaserver_url('/local/mediaserver/admin/edit.php', array('id' => $stream->id)));
+}
+
+$frame = local_mediaserver_stream_frame($stream->id);
+$streampath = local_mediaserver_stream_path($stream);
+
+// Initialise javascript module, for loading flash player.
+$module = array(
+    'name' => 'local_mediaserver_player',
+    'fullpath' => '/local/mediaserver/flowplayer/module.js',
+    'requires' => array(),
+);
+
+$PAGE->requires->js('/lib/flowplayer/flowplayer-3.2.13.js', false);
+$PAGE->requires->js_init_call('M.local_mediaserver_player.initialize', array($frame->out_as_local_url(true), $streampath), false, $module);
+
+echo $OUTPUT->header();
+echo $OUTPUT->heading(s($title), 3);
+
+// Output server host/app configuration to page.
+$config = get_config('local_mediaserver');
+$configjs = "M.local_mediaserver_player = {};\n";
+$configjs .= js_writer::set_variable('M.local_mediaserver_player.cfg', array('host' => $config->host, 'app' => $config->app), false);
+
+echo html_writer::script($configjs);
+
+$loading = get_string('loadinghelp');
+echo html_writer::tag('div', $loading, array('id' => 'stream-container', 'class' => 'stream-frame'));
+
+$dateformat = get_string('strftimedatetime', 'langconfig');
+$author = $DB->get_record('user', array('id' => $stream->userid));
+
+$a = new stdClass;
+$a->name = fullname($author);
+$a->date = userdate($stream->submitted, $dateformat);
+
+$streaminfo  = $OUTPUT->heading(get_string('streaminfo', 'local_mediaserver', $a), 4);
+$streaminfo .= html_writer::tag('p', format_text($stream->description, FORMAT_MOODLE, array('para' => false)));
+
+if ($stream->source == 'epg') {
+    $sql = 'SELECT p.*, c.name AS channel
+              FROM {local_mediaserver_program} p
+              JOIN {local_mediaserver_recording} r ON r.program = p.id
+              JOIN {local_mediaserver_channel} c ON c.id = p.channel
+             WHERE r.stream = :stream';
+
+    $program = $DB->get_record_sql($sql, array('stream' => $stream->id), MUST_EXIST);
+
+    $a = new stdClass;
+    $a->date = local_mediaserver_program_time($program->timebegin, $dateformat);
+    $a->channel = $program->channel;
+
+    $streaminfo .= html_writer::tag('p', format_text($program->description, FORMAT_MOODLE, array('para' => false)));
+    $streaminfo .= html_writer::tag('p', get_string('programinfo', 'local_mediaserver', $a));
+}
+
+echo html_writer::tag('div', $streaminfo, array('class' => 'coursebox'));
+
+// Trigger media viewed event.
+$eventparams = array(
+    'objectid' => $stream->id,
+    'relateduserid' => $USER->id,
+);
+$event = \local_mediaserver\event\media_viewed::create($eventparams);
+$event->add_record_snapshot('local_mediaserver_stream', $stream);
+$event->trigger();
+
+echo $OUTPUT->footer();

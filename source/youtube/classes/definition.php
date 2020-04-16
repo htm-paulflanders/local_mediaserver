@@ -1,0 +1,62 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id: definition.php 4443 2016-10-27 12:17:29Z pholden $
+ */
+
+namespace mediasource_youtube;
+
+defined('MOODLE_INTERNAL') || die();
+
+class definition extends \local_mediaserver\media_source {
+
+    /**
+     * Return video ID matching both short and long forms of Youtube URL
+     *
+     * @return string|boolean false if no match
+     */
+    public function get_reference() {
+        $result = false;
+
+        // Optional www. or m. subdomain, followed by long/short form of domain.
+        $domain = '(www\.|m\.)?(youtube(?:\-nocookie)?\.com|youtu\.be)';
+
+        // Optional path element.
+        $path = '(embed/|v/|watch\?(?:v=|.*&v=))?';
+
+        if (preg_match('~^https?://' . $domain . '/' . $path . '(?<reference>[\w\-_]{11})~i', $this->get_url(), $matches)) {
+            $result = $matches['reference'];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Return job script for a Youtube stream
+     *
+     * @param stdClass $stream
+     * @return string
+     */
+    public function get_job(\stdClass $stream) {
+        $arguments = array('id' => $stream->code, 'vid' => $stream->reference, 'title' => $stream->title);
+
+        return self::safe_job('./get_youtube.sh', $arguments);
+    }
+}

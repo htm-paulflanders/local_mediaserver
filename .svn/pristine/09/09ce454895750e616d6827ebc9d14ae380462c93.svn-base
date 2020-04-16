@@ -1,0 +1,74 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+namespace local_mediaserver;
+
+defined('MOODLE_INTERNAL') || die();
+
+require_once($CFG->dirroot . '/local/mediaserver/lib.php');
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+class observers {
+
+    /**
+     * Media completed
+     *
+     * @param \local_mediaserver\event\media_completed $event
+     * @return void
+     */
+    public static function media_completed(\local_mediaserver\event\media_completed $event) {
+        $stream = $event->get_record_snapshot('local_mediaserver_stream', $event->objectid);
+
+        $eventdata = new \stdClass;
+        $eventdata->component = 'local_mediaserver';
+        $eventdata->name = 'notification';
+        $eventdata->notification = 1;
+        $eventdata->userfrom = \core_user::get_support_user();
+        $eventdata->userto = \core_user::get_user($stream->userid, '*', MUST_EXIST);
+
+        // Make sure we have a valid user/e-mail.
+        if ($eventdata->userto->deleted or !validate_email($eventdata->userto->email)) {
+            return;
+        }
+
+        // Link back to the media.
+        $url = local_mediaserver_stream_url($stream);
+
+        $eventdata->contexturlname = get_string('mediaview', 'local_mediaserver');
+        $eventdata->contexturl = $url->out(true);
+
+        // Construct message content.
+        $eventdata->subject = $stream->title;
+        $eventdata->smallmessage = $stream->title;
+
+        $options = new \stdClass;
+        $options->name = fullname($eventdata->userto);
+        $options->url = $eventdata->contexturl;
+
+        $eventdata->fullmessage = get_string('media_completed_message', 'local_mediaserver', $options);
+        $eventdata->fullmessageformat = FORMAT_PLAIN;
+        $eventdata->fullmessagehtml = '';
+
+        message_send($eventdata);
+    }
+}

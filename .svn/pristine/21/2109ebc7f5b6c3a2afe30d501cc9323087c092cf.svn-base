@@ -1,0 +1,202 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+require(dirname(dirname(dirname(dirname(__FILE__)))) . '/config.php');
+require_once($CFG->libdir . '/searchlib.php');
+require_once($CFG->libdir . '/tablelib.php');
+require_once($CFG->dirroot . '/local/mediaserver/lib.php');
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+$id = optional_param('id', 0, PARAM_INT);
+$search = optional_param('search', '', PARAM_NOTAGS);
+$page = optional_param('page', 0, PARAM_INT);
+$finished = optional_param('finished', 0, PARAM_BOOL);
+
+$context = context_system::instance();
+
+require_login(SITEID, false);
+require_capability('local/mediaserver:add', $context);
+
+$strseries = get_string('recordseries', 'local_mediaserver');
+$strtitle = get_string('sourceepg', 'local_mediaserver') . ': ' . $strseries;
+
+$PAGE->set_context($context);
+$PAGE->set_pagelayout('standard');
+$PAGE->set_url(new local_mediaserver_url('/local/mediaserver/guide/links.php', array('search' => $search, 'page' => $page)));
+$PAGE->set_title($strtitle);
+
+$action = new local_mediaserver_url($PAGE->url->out_omit_querystring());
+$PAGE->set_button(local_mediaserver_search_form($action, 'get', $search, 'seriessearch'));
+
+// Initialise javascript module, for AJAX toggling of series finished flag.
+$PAGE->requires->strings_for_js(array('enable', 'disable'), 'moodle');
+$PAGE->requires->yui_module('moodle-local_mediaserver-series', 'M.local_mediaserver.series');
+
+// Users with 'edit' capability can manage all series links.
+$editallseries = has_capability('local/mediaserver:edit', $context);
+
+if ($id > 0) {
+    require_sesskey();
+
+    $params = array('id' => $id);
+    if (! $editallseries) {
+        $params['userid'] = $USER->id;
+    }
+
+    $DB->set_field('local_mediaserver_series', 'finished', $finished, $params);
+
+    redirect($PAGE->url);
+}
+
+echo $OUTPUT->header();
+echo $OUTPUT->heading_with_help($strseries, 'recordseriesdetailed', 'local_mediaserver', '', '', 3);
+
+$strings = get_strings(array('enable', 'disable', 'never'));
+$dateformat = get_string('strftimedatetime', 'langconfig');
+
+$headers = get_strings(array('programtitle', 'series', 'episodes', 'episodelast'), 'local_mediaserver');
+
+$table = new flexible_table('local_mediaserver');
+$table->define_columns(array('toggle', 'title', 'search', 'user', 'series', 'episodes', 'episodelast'));
+$table->define_headers(array(null, $headers->programtitle, null, get_string('user'), $headers->series, $headers->episodes, $headers->episodelast));
+$table->define_baseurl($PAGE->url);
+$table->attributes['class'] = 'flexible table-programs';
+$table->setup();
+
+$where = '1=1';
+$params = array();
+
+$tokenreplacements = array('title:' => 'subject:', 'enabled:' => 'instance:');
+$search = trim(strtr($search, $tokenreplacements));
+if ($search) {
+    $parser = new search_parser();
+    $lexer = new search_lexer($parser);
+
+    if ($lexer->parse($search)) {
+        $parsetree = $parser->get_parsed_array();
+
+        // Series is enabled if it hasn't been flagged as finished (match UI terminology).
+        $enabled = $DB->sql_bitxor('s.finished', 1);
+        list($where, $params) = local_mediaserver_search_generate_sql(
+            $parsetree, 's.title', 's.title', 's.userid', 'u.id', 'u.firstname', 'u.lastname', 'COALESCE(pr.latest, 0)', $enabled
+        );
+    }
+}
+
+// Users without the 'reports' capability can only see their own series links.
+if (! has_capability('local/mediaserver:reports', $context)) {
+    $where .= ' AND s.userid = :userid';
+    $params['userid'] = $USER->id;
+}
+
+$fields = 's.*, COALESCE(pr.episodes, 0) AS episodes, pr.first, pr.latest, ' . get_all_user_name_fields(true, 'u');
+
+// We will LEFT JOIN against all recorded series programs.
+$sqlinner = 'SELECT p.title, p.series, COUNT(p.id) AS episodes, MIN(p.timebegin) AS first, MAX(p.timebegin) AS latest
+               FROM {local_mediaserver_program} p
+               JOIN {local_mediaserver_recording} r ON r.program = p.id
+              WHERE p.series > 0 AND p.episode > 0
+           GROUP BY p.title, p.series';
+
+$sql = 'SELECT ' . $fields . '
+          FROM {local_mediaserver_series} s
+          JOIN {user} u ON u.id = s.userid
+     LEFT JOIN (' . $sqlinner . ') pr ON pr.title = s.title AND pr.series = s.series
+         WHERE ' . $where . '
+      ORDER BY pr.latest DESC, s.title, s.series';
+
+$serieslinks = $DB->get_records_sql($sql, $params, $page * LOCAL_MEDIASERVER_MEDIA_PAGING, LOCAL_MEDIASERVER_MEDIA_PAGING);
+foreach ($serieslinks as $link) {
+    if ($link->finished) {
+        $iconfile = 't/show';
+        $icontext = $strings->enable;
+        $rowclass = 'dimmed_text';
+    } else {
+        $iconfile = 't/hide';
+        $icontext = $strings->disable;
+        $rowclass = '';
+    }
+
+    // Check whether current user can edit the link.
+    if ($link->userid == $USER->id or $editallseries) {
+        $toggle = clone($PAGE->url);
+        $toggle->params(array('id' => $link->id, 'finished' => (int)!$link->finished, 'sesskey' => sesskey()));
+
+        $attributes = array('class' => 'iconsmall iconstate', 'data-id' => $link->id, 'data-state' => $link->finished);
+        $icon = $OUTPUT->action_icon($toggle, new pix_icon($iconfile, $icontext, 'core', $attributes));
+    } else {
+        $icon = '';
+    }
+
+    $title = html_writer::tag('span', s($link->title), array('title' => $link->title));
+
+    $userlink = html_writer::link(new moodle_url('/user/profile.php', array('id' => $link->userid)), fullname($link));
+
+    // If we have recorded series episodes, then create search form to list them.
+    if ($link->episodes > 0) {
+        if (str_word_count($link->title) == 1) {
+            $searchstr = 'title:' . $link->title;
+        } else {
+            $searchstr = '"' . $link->title . '"';
+        }
+
+        $searchurl = local_mediaserver_guide_search_url(array(
+            'search' => $searchstr . ' series:' . $link->series,
+            'recorded' => 1,
+            'timebegindisable' => 0,
+            'timebegin' => local_mediaserver_time_round($link->first, true),
+            'timeenddisable' => 0,
+            'timeend' => local_mediaserver_time_round($link->latest, true),
+        ));
+
+        $searchlink = $OUTPUT->single_button($searchurl, '', 'post', array('class' => 'search-button'));
+
+        $episodelast = local_mediaserver_local_time($link->latest, $dateformat);
+    } else {
+        $searchlink = null;
+
+        $episodelast = $strings->never;
+    }
+
+    $table->add_data(array($icon, $title, $searchlink, $userlink, $link->series, $link->episodes, $episodelast), $rowclass);
+}
+
+$sqlcount = str_replace($fields, 'COUNT(*)', $sql);
+$totalcount = $DB->count_records_sql($sqlcount, $params);
+
+// Add notification for search results count.
+if ($search) {
+    $notifyclass = ($totalcount > 0 ? 'notifysuccess' : 'notifyproblem');
+
+    echo $OUTPUT->notification(get_string('searchfound', 'local_mediaserver', number_format($totalcount)), $notifyclass);
+}
+
+// Prevent $table object printing 'Nothing found' header if a search returns 0 items.
+if (!$search or $totalcount > 0) {
+    $table->print_html();
+}
+
+$pagingbar = new paging_bar($totalcount, $page, LOCAL_MEDIASERVER_MEDIA_PAGING, $PAGE->url);
+echo $OUTPUT->render($pagingbar);
+
+echo $OUTPUT->footer();

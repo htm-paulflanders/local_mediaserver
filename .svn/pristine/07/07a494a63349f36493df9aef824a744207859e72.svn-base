@@ -1,0 +1,137 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+require(dirname(dirname(dirname(dirname(__FILE__)))) . '/config.php');
+require_once($CFG->libdir.'/filelib.php');
+require_once($CFG->dirroot . '/repository/lib.php');
+require_once($CFG->dirroot . '/local/mediaserver/lib.php');
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+$channelid = optional_param('id', 0, PARAM_INT);
+
+$context = context_system::instance();
+
+require_login(SITEID, false);
+require_capability('local/mediaserver:channels', $context);
+
+$strchannels = get_string('channels', 'local_mediaserver');
+$straction = get_string($channelid > 0 ? 'edit' : 'add');
+$strtitle = get_string('sourceepg', 'local_mediaserver') . ': ' . $strchannels . ': ' . $straction;
+
+$PAGE->set_context($context);
+$PAGE->set_pagelayout('standard');
+$PAGE->set_url(new local_mediaserver_url('/local/mediaserver/guide/channeledit.php'));
+$PAGE->set_title($strtitle);
+
+$PAGE->navbar->add($straction);
+
+$returnurl = new local_mediaserver_url('/local/mediaserver/guide/channels.php');
+navigation_node::override_active_url($returnurl);
+
+if ($channelid) {
+    $channel = $DB->get_record('local_mediaserver_channel', array('id' => $channelid), '*', MUST_EXIST);
+} else {
+    $channel = new stdClass();
+    $channel->id = null;
+    $channel->datafile = 0;
+    $channel->hourbegin = 0;
+    $channel->hourend = 24;
+}
+
+$filemanageroptions = array('accepted_types' => 'web_image', 'subdirs' => 0, 'maxfiles' => 1, 'return_types' => FILE_INTERNAL);
+
+$channel->iconfile = file_get_submitted_draft_itemid('iconfile');
+file_prepare_draft_area($channel->iconfile, $context->id, 'local_mediaserver', 'channel', $channel->id, $filemanageroptions);
+
+$channel->disabled = local_mediaserver_channel_disabled($channel);
+
+$mform = new \local_mediaserver\form\channel(null, array($channel, $filemanageroptions));
+
+if ($mform->is_cancelled()) {
+    redirect($returnurl);
+} else if ($data = $mform->get_data()) {
+    $channel->name = trim($data->name);
+    $channel->datafile = $data->datafile;
+
+    if ($channeldisable = isset($data->disabled)) {
+        $channel->hourbegin = 0;
+        $channel->hourend = 0;
+    } else {
+        $channel->hourbegin = $data->hourbegin;
+        $channel->hourend = $data->hourend;
+    }
+
+    // We're updating the channel if it's ID field is set.
+    if ($channelupdate = (! empty($channel->id))) {
+        $oldsortorder = $channel->sortorder;
+    }
+
+    $channel->sortorder = $data->sortorder;
+
+    if ($channelupdate) {
+        // Changing channel sortorder.
+        if ($oldsortorder != $data->sortorder) {
+            $sql = 'UPDATE {local_mediaserver_channel}
+                       SET sortorder = CASE
+                           WHEN sortorder > :old THEN sortorder - 1
+                           ELSE sortorder + 1
+                       END
+                     WHERE sortorder BETWEEN :lower AND :upper';
+
+            $params = array(
+                'old' => $oldsortorder,
+                'lower' => min($oldsortorder, $data->sortorder),
+                'upper' => max($oldsortorder, $data->sortorder)
+            );
+
+            $DB->execute($sql, $params);
+        }
+
+        // Remove channel data if disabled.
+        if ($channeldisable) {
+            local_mediaserver_channel_clean($channel->id);
+        }
+
+        $DB->update_record('local_mediaserver_channel', $channel);
+    } else {
+        $channel->id = $DB->insert_record('local_mediaserver_channel', $channel);
+    }
+
+    $fs = get_file_storage();
+    $fs->delete_area_files($context->id, 'local_mediaserver', 'channel', $channel->id);
+
+    file_save_draft_area_files($channel->iconfile, $context->id, 'local_mediaserver', 'channel', $channel->id, $filemanageroptions);
+
+    $files = $fs->get_area_files($context->id, 'local_mediaserver', 'channel', $channel->id, 'filename', false);
+    $icon = reset($files);
+
+    $DB->set_field('local_mediaserver_channel', 'icon', $icon->get_filename(), array('id' => $channel->id));
+
+    redirect($returnurl);
+}
+
+echo $OUTPUT->header();
+
+$mform->display();
+
+echo $OUTPUT->footer();

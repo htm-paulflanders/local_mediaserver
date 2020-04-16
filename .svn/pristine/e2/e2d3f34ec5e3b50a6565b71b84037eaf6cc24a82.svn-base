@@ -1,0 +1,111 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+namespace local_mediaserver\form;
+
+defined('MOODLE_INTERNAL') || die();
+
+class media_web extends media_base {
+
+    /**
+     * Form definition
+     *
+     * @return void
+     */
+    public function definition() {
+        $mform = $this->_form;
+
+        $strfield = get_string('addcontenturl', 'local_mediaserver');
+
+        $mform->addElement('header', 'mediafile', $strfield);
+        $mform->addElement('url', 'externalurl', $strfield, array('maxlength' => 255), array('usefilepicker' => true));
+        $mform->addRule('externalurl', null, 'required');
+        $mform->addRule('externalurl', get_string('maximumchars', '', 255), 'maxlength', 255);
+        // Note: PARAM_URL is too strict, i.e. with anchor elements returned by the Youtube repository - validate later.
+        $mform->setType('externalurl', PARAM_RAW_TRIMMED);
+
+        parent::definition();
+    }
+
+    /**
+     * Form validation
+     *
+     * @param array $data raw form data
+     * @param array $files
+     * @return array of errors
+     */
+    public function validation($data, $files) {
+        global $DB;
+
+        $errors = parent::validation($data, $files);
+
+        // Normalize external URL field.
+        $reference = $this->normalize_url($data['externalurl']);
+
+        // Test URL looks valid up to #anchor (some repositories don't send valid data here).
+        $testurl = preg_replace('/(#.*)$/', '', $reference);
+        if (! clean_param($testurl, PARAM_URL)) {
+            $errors['externalurl'] = get_string('invalidurl', 'url');
+        } else {
+            // Find matching source type.
+            if ($source = local_mediaserver_source_reference($reference)) {
+                $type = $source->get_source_type();
+
+                // Reset reference relative to current source.
+                $reference = $source->get_reference($reference);
+            } else {
+                $type = LOCAL_MEDIASERVER_SOURCE_DEFAULT;
+            }
+
+            // Stream reference must be unique for the source type.
+            if ($stream = $DB->get_record('local_mediaserver_stream', array('source' => $type, 'reference' => $reference))) {
+                if ($stream->done) {
+                    $url = local_mediaserver_stream_url($stream);
+
+                    $errors['externalurl'] = get_string('errormediaexistsdone', 'local_mediaserver', $url->out());
+                } else {
+                    $errors['externalurl'] = get_string('errormediaexistsqueue', 'local_mediaserver');
+                }
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * Return normalized URL
+     *
+     * @param string $url
+     * @return string
+     */
+    public function normalize_url($url) {
+        $url = html_entity_decode($url, ENT_QUOTES, 'UTF-8');
+
+        // Ensure scheme part exists in URL.
+        if (! preg_match('/^[a-z]+:/i', $url)) {
+            $url = 'http://' . $url;
+        }
+
+        return $url;
+    }
+}

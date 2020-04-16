@@ -1,0 +1,954 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+defined('MOODLE_INTERNAL') || die();
+
+define('LOCAL_MEDIASERVER_TIMEZONE', 'Europe/London');
+define('LOCAL_MEDIASERVER_SOURCE_DEFAULT', 'url');
+/** @var int time window before a program starts to schedule recording. */
+define('LOCAL_MEDIASERVER_RECORD_BUFFER', 300);
+
+/**
+ * Get list of mediasource sub-plugins
+ *
+ * @return array of plugins
+ */
+function local_mediaserver_source_plugins() {
+    return core_component::get_plugin_list_with_class('mediasource', 'definition');
+}
+
+/**
+ * Return mediasource plugin instance that matches reference URL
+ *
+ * @param string $url
+ * @return \local_mediaserver\media_source instance|null
+ */
+function local_mediaserver_source_reference($url) {
+    $instance = null;
+
+    $plugins = local_mediaserver_source_plugins();
+
+    foreach ($plugins as $plugin) {
+        $plugininstance = new $plugin;
+
+        if ($plugininstance->get_reference($url) !== false) {
+            $instance = fullclone($plugininstance);
+
+            break;
+        }
+    }
+
+    return $instance;
+}
+
+/**
+ * Return mediasource plugin instance icon, fallback to default icons if not available
+ *
+ * @param string $source
+ * @return pix_icon
+ */
+function local_mediaserver_source_icon($source) {
+    $sourceclass = "mediasource_{$source}\definition";
+
+    if (class_exists($sourceclass)) {
+        $instance = new $sourceclass;
+
+        return $instance->get_icon();
+    } else {
+        $name = get_string('source' . $source, 'local_mediaserver');
+
+        return new pix_icon($source, $name, 'local_mediaserver');
+    }
+}
+
+/**
+ * Return list of root categories
+ *
+ * @return array
+ */
+function local_mediaserver_root_categories() {
+    global $DB;
+
+    return $DB->get_records_menu('local_mediaserver_category', array('path' => '/'), 'name', 'id, name');
+}
+
+/**
+ * Return complete path to a category
+ *
+ * @param stdClass $category
+ * @return string
+ */
+function local_mediaserver_category_path(stdClass $category) {
+    if ($category->id > 0) {
+        $path = $category->path . $category->id . '/';
+    } else {
+        $path = '/';
+    }
+
+    return $path;
+}
+
+/**
+ * Return child categories of a category
+ *
+ * @param stdClass $category
+ * @return array of stdClass
+ */
+function local_mediaserver_category_children(stdClass $category) {
+    global $DB;
+
+    $path = local_mediaserver_category_path($category);
+
+    return $DB->get_records('local_mediaserver_category', array('path' => $path), 'name');
+}
+
+/**
+ * Move a category (and all descendants) to a new path
+ *
+ * @param stdClass $category
+ * @param string $oldpath
+ * @param string $newpath
+ * @return void
+ */
+function local_mediaserver_category_move(stdClass $category, $oldpath, $newpath) {
+    global $DB;
+
+    $children = local_mediaserver_category_children($category);
+    foreach ($children as $child) {
+        local_mediaserver_category_move($child, $oldpath, $newpath);
+    }
+
+    $path = str_replace($oldpath, $newpath, $category->path);
+    $DB->set_field('local_mediaserver_category', 'path', $path, array('id' => $category->id));
+}
+
+function local_mediaserver_category_delete(stdClass $category) {
+    global $DB;
+
+    // Move category descendants into current category.
+    $children = local_mediaserver_category_children($category);
+    foreach ($children as $child) {
+        $oldpath = "/{$category->id}/";
+
+        local_mediaserver_category_move($child, $oldpath, '/');
+    }
+
+    $DB->delete_records('local_mediaserver_category', array('id' => $category->id));
+
+    // TODO: also move media items.
+}
+
+/**
+ * Normalize a filename, returning as ascii with non alpha-numeric characters
+ * replaced with underscores.
+ *
+ * @param string $filename
+ * @return string
+ */
+function local_mediaserver_clean_filename($filename) {
+    $filename = iconv('UTF-8', 'ASCII//TRANSLIT', $filename);
+
+    $filename = preg_replace('/[^a-z0-9]/i', '_', $filename);
+    $filename = preg_replace('/(_+)/', '_', $filename);
+
+    return $filename;
+}
+
+/**
+ * Return local_mediaserver_url instance for viewing a stream
+ *
+ * @param stdClass $stream
+ * @return local_mediaserver_url
+ */
+function local_mediaserver_stream_url(stdClass $stream) {
+    if (get_config('local_mediaserver', 'shortviewurl')) {
+        // Normalize title to lowercase ASCII.
+        $title = local_mediaserver_clean_filename($stream->title);
+        $title = core_text::strtolower($title);
+
+        $title = trim($title, '_');
+
+        $urlpath = sprintf('/local/mediaserver/view/%d/%s/', $stream->id, $title);
+        $url = new local_mediaserver_url($urlpath);
+    } else {
+        $url = new local_mediaserver_url('/local/mediaserver/view.php', array('id' => $stream->id));
+    }
+
+    return $url;
+}
+
+/**
+ * Return a stream icon
+ *
+ * @param stdClass $stream
+ * @param string $icon
+ * @return string HTML img tag
+ */
+function local_mediaserver_stream_icon(stdClass $stream, $icon = 'f1') {
+    $context = context_system::instance();
+
+    $source = moodle_url::make_pluginfile_url($context->id, 'local_mediaserver', 'frame', $stream->id, '/', $icon . '.png');
+
+    return html_writer::empty_tag('img', array('src' => $source, 'alt' => $stream->title));
+}
+
+/**
+ * Return stream file path, as located on media server
+ *
+ * @param stdClass $stream
+ * @return string
+ */
+function local_mediaserver_stream_path(stdClass $stream) {
+    $filename = local_mediaserver_clean_filename($stream->title);
+
+    return sprintf('mp4:%s/%s', $stream->code, $filename);
+}
+
+/**
+ * Generate a unique 5 character code for new stream
+ *
+ * @return string
+ */
+function local_mediaserver_stream_code() {
+    global $DB;
+
+    do {
+        $longcode = md5(uniqid(rand(), true));
+
+        $code = substr($longcode, -5);
+    } while ($DB->record_exists('local_mediaserver_stream', array('code' => $code)));
+
+    return $code;
+}
+
+/**
+ * Return cut-off time for saving XMLTV program data
+ *
+ * @return int timestamp
+ */
+function local_mediaserver_channel_listing_end() {
+    return strtotime('next monday 06:00');
+}
+
+/**
+ * Return list of hours channel is broadcasting
+ *
+ * @param int $hourbegin
+ * @param int $hourend
+ * @return array
+ */
+function local_mediaserver_channel_broadcast_hours($hourbegin, $hourend) {
+    $hours = array();
+
+    if ($hourbegin < $hourend) {
+        $hours = range($hourbegin, $hourend - 1);
+    } else if ($hourbegin > $hourend) {
+        $day = range(0, 23);
+        $nohours = range($hourend, $hourbegin - 1);
+        $hours = array_diff($day, $nohours);
+    }
+
+    return $hours;
+}
+
+/**
+ * Round time down to beginning of hour/day
+ *
+ * @param int $time Unix timestamp
+ * @param bool $roundday Round to beginning of day
+ * @return int
+ */
+function local_mediaserver_time_round($time, $roundday = false) {
+    $time -= ($time % HOURSECS);
+
+    if ($roundday) {
+        $date = usergetdate($time);
+
+        $time = mktime(0, 0, 0, $date['mon'], $date['mday'], $date['year']);
+    }
+
+    return $time;
+}
+
+/**
+ * Return timezone data for a given timestamp
+ *
+ * @param int $year
+ * @return array start times for GMT/BST
+ */
+function local_mediaserver_timezone_data($year) {
+    global $DB;
+
+    static $cache = array();
+
+    if (! array_key_exists($year, $cache)) {
+        // We want to get the latest definition, so order by year.
+        $sql = 'SELECT * from {timezone} WHERE name = :name ORDER BY year DESC';
+        $timezone = $DB->get_record_sql($sql, array('name' => LOCAL_MEDIASERVER_TIMEZONE), IGNORE_MULTIPLE);
+
+        $cache[$year] = dst_changes_for_year($year, $timezone);
+    }
+
+    return $cache[$year];
+}
+
+/**
+ * Returned formatted timestamp
+ *
+ * @param int $timestamp
+ * @param string $format strftime format
+ * @return string
+ */
+function local_mediaserver_program_time($timestamp, $format = null) {
+    if ($format === null) {
+        $format = get_string('strftimedaydatetime', 'langconfig');
+    }
+
+    $year = date('Y', $timestamp);
+    $tzdata = local_mediaserver_timezone_data($year);
+
+    // If time falls within DST, shift an hour forward.
+    if ($timestamp > $tzdata['dst'] && $timestamp < $tzdata['std']) {
+        $timestamp += HOURSECS;
+    }
+
+    $string = gmstrftime($format, $timestamp);
+
+    // Returned string may contain day/hour prefixed with 0; remove it to match the userdate fix date/hour arguments.
+    $string = preg_replace('/(^0| 0)(\d)/', ' $2', $string);
+
+    return trim($string);
+}
+
+/**
+ * Extract program start and end time from XMLTV program data
+ *
+ * @param string $date i.e. 12/02/2014
+ * @param string $begin i.e. 14:00
+ * @param string $end i.e. 14:30
+ * @return array of int timestamp begin/end
+ */
+function local_mediaserver_extract_program_timing($date, $begin, $end) {
+    list($day, $month, $year) = explode('/', $date);
+    list($hourbegin, $minutebegin) = explode(':', $begin);
+    list($hourend, $minuteend) = explode(':', $end);
+
+    // Always calculate in GMT, adjust for DST later (they will be an hour out).
+    $timebegin = gmmktime($hourbegin, $minutebegin, 0, $month, $day, $year);
+    $timeend   = gmmktime($hourend, $minuteend, 0, $month, $day, $year);
+
+    // Program crosses over midnight, add a day to timeend.
+    if ($timebegin > $timeend) {
+        $timeend += DAYSECS;
+    }
+
+    // If times fall within DST, we need to shift back an hour to calculate their 'real' GMT value.
+    $year = date('Y', $timebegin);
+    $tzdata = local_mediaserver_timezone_data($year);
+    if ($timebegin > $tzdata['dst'] && $timebegin < $tzdata['std']) {
+        $timebegin -= HOURSECS;
+    }
+    if ($timeend > $tzdata['dst'] && $timeend < $tzdata['std']) {
+        $timeend -= HOURSECS;
+    }
+
+    return array($timebegin, $timeend);
+}
+
+/**
+ * Extract program series information from XMLTV program data
+ *
+ * @param string $data
+ * @return array of int series/episode
+ */
+function local_mediaserver_extract_program_series($data) {
+    $series = $episode = 0;
+
+    if (preg_match('/^(\d+)(\/\d+)?, series (\d+)$/i', $data, $matches)) {
+        $series = $matches[3];
+        $episode = $matches[1];
+    }
+
+    return array($series, $episode);
+}
+
+/**
+ * If episode title starts or ends with the program title, strip it out
+ *
+ * @param string $program title
+ * @param string $episode title
+ * @return string
+ */
+function local_mediaserver_trim_episode_title($program, $episode) {
+    $program = preg_quote($program, '/');
+    $episode = preg_replace("/(^$program)|($program$)/", '', $episode, 1);
+
+    return trim($episode, ': -');
+}
+
+/**
+ * Helper function for \local_mediaserver\xmltv_download class
+ *
+ * @param stdClass $channel
+ * @param int $listingbegin programs must begin after this time
+ * @return array of stdClass
+ */
+function local_mediaserver_channel_download(stdClass $channel, $listingbegin) {
+    $listingend = local_mediaserver_channel_listing_end();
+    $programs = array();
+
+    $channeldata = new \local_mediaserver\xmltv_download($channel->datafile);
+    foreach ($channeldata as $data) {
+        list($timebegin, $timeend) = local_mediaserver_extract_program_timing($data[XMLTV_DATE], $data[XMLTV_BEGIN], $data[XMLTV_END]);
+
+        // Broadcast must be between listing begin/end.
+        if ($timebegin < $listingbegin || $timeend > $listingend) {
+            continue;
+        }
+
+        // Filter out zero-length programs.
+        if ($timebegin == $timeend) {
+            continue;
+        }
+
+        // Broadcast must be between channel begin/end.
+        $hours = local_mediaserver_channel_broadcast_hours($channel->hourbegin, $channel->hourend);
+        $hourbegin = date('G', $timebegin);
+        if (! in_array($hourbegin, $hours)) {
+            continue;
+        }
+
+        $record = new stdClass();
+        $record->channel = $channel->id;
+        $record->title = $data[XMLTV_TITLE];
+        $record->genre = $data[XMLTV_GENRE];
+
+        // Filter out redundant none-programs.
+        if ($record->title == 'Close' && $record->genre == 'No Genre') {
+            continue;
+        }
+
+        list($series, $episode) = local_mediaserver_extract_program_series($data[XMLTV_SERIES]);
+        $record->series = $series;
+        $record->episode = $episode;
+
+        $record->episodetitle = local_mediaserver_trim_episode_title($record->title, $data[XMLTV_EPISODE]);
+        $record->description = $data[XMLTV_DESCRIPTION];
+
+        $record->timebegin = $timebegin;
+        $record->timeend = $timeend;
+
+        $programs[] = $record;
+    }
+
+    return $programs;
+}
+
+/**
+ * Remove listings for old/unrecorded channel data
+ *
+ * @param int $channelid (0 for all)
+ * @param int $time Delete channel data before this time (0 for all)
+ * @return void
+ */
+function local_mediaserver_channel_clean($channelid = 0, $time = 0) {
+    global $DB;
+
+    $select = 'id NOT IN (SELECT program FROM {local_mediaserver_recording})';
+    $params = array();
+
+    if ($channelid !== 0) {
+        $select .= ' AND channel = :channel';
+        $params['channel'] = $channelid;
+    }
+
+    if ($time !== 0) {
+        $select .= ' AND timebegin < :time';
+        $params['time'] = $time;
+    }
+
+    $DB->delete_records_select('local_mediaserver_program', $select, $params);
+}
+
+/**
+ * Test whether a channel is disabled (no configured broadcast range)
+ *
+ * @param stdClass $channel
+ * @return boolean
+ */
+function local_mediaserver_channel_disabled(stdClass $channel) {
+    return ($channel->hourbegin + $channel->hourend == 0);
+}
+
+/**
+ * Return a channel icon
+ *
+ * @param stdClass $channel
+ * @return string HTML img tag
+ */
+function local_mediaserver_channel_icon(stdClass $channel) {
+    $context = context_system::instance();
+
+    $source = moodle_url::make_pluginfile_url($context->id, 'local_mediaserver', 'channel', $channel->id, '/', $channel->icon);
+
+    return html_writer::empty_tag('img', array('src' => $source, 'alt' => $channel->name, 'title' => $channel->name));
+}
+
+/**
+ * Return all necessary program fields required to by renderer/API.
+ *
+ * @return string
+ */
+function local_mediaserver_program_fields() {
+    $fields = array(
+        'p.*',
+        'COALESCE(r.stream, 0) AS stream',
+        'CASE WHEN f.id IS NULL THEN 0 ELSE 1 END AS favourite',
+        'CASE WHEN s.id IS NULL THEN 0 ELSE 1 END AS serieslink',
+    );
+
+    return implode(', ', $fields);
+}
+
+/**
+ * Return an available DVB tuner for a given program, or false if none available
+ *
+ * @param stdClass $program
+ * @return int|false
+ */
+function local_mediaserver_program_tuner(stdClass $program) {
+    global $DB;
+
+    // Define available tuners.
+    $tunercount = 2;
+    $tuners = range(1, $tunercount);
+
+    // Define time range.
+    $timebegin = $program->timebegin;
+    $timeend = ($program->timeend - 1);
+
+    $sql = 'SELECT r.id, r.tuner, p.timebegin, p.timeend, :timebegin AS testbegin, :timeend AS testend
+              FROM {local_mediaserver_recording} r
+              JOIN {local_mediaserver_program} p ON p.id = r.program
+            HAVING p.timebegin BETWEEN testbegin AND testend
+                OR p.timeend BETWEEN testbegin + 1 AND testend
+                OR testbegin BETWEEN p.timebegin AND p.timeend - 1';
+
+    // Get keyed array of [recording id => tuner].
+    $recordings = $DB->get_records_sql_menu($sql, array('timebegin' => $timebegin, 'timeend' => $timeend));
+    foreach ($recordings as $tuner) {
+        if (($index = array_search($tuner, $tuners)) !== false) {
+            // Tuner being used, so remove from available tuners.
+            unset($tuners[$index]);
+        }
+    }
+
+    return reset($tuners);
+}
+
+/**
+ * Schedule a program to be recorded
+ *
+ * @param stdClass $program
+ * @param int $tuner
+ * @param int $categoryid
+ * @param string $title
+ * @param string $description
+ * @param int $userid
+ * @return bool
+ */
+function local_mediaserver_program_record(stdClass $program, $tuner, $categoryid, $title, $description, $userid = 0) {
+    global $DB, $USER;
+
+    // Make sure there is a real user specified.
+    if ($userid === 0) {
+        $userid = $USER->id;
+    }
+
+    // Construct stream record.
+    $stream = new stdClass;
+    $stream->userid = $userid;
+    $stream->category = $categoryid;
+    $stream->code = local_mediaserver_stream_code();
+    $stream->source = 'epg';
+    $stream->reference = '';
+    $stream->title = trim($title);
+    $stream->description = trim($description);
+    $stream->done = 0;
+    $stream->submitted = time();
+    $stream->id = $DB->insert_record('local_mediaserver_stream', $stream);
+
+    // Construct recording record.
+    $recording = new stdClass;
+    $recording->program = $program->id;
+    $recording->stream = $stream->id;
+    $recording->tuner = $tuner;
+    $DB->insert_record('local_mediaserver_recording', $recording);
+
+    // Create job for media server.
+    $filename = $stream->code . '.rec';
+
+    $channel = $DB->get_field('local_mediaserver_channel', 'name', array('id' => $program->channel), MUST_EXIST);
+    $length = ($program->timeend - $program->timebegin);
+
+    $arguments = array(
+        'id' => $stream->code, 'title' => $stream->title, 'tuner' => $recording->tuner, 'channel' => $channel, 'start' => $program->timebegin, 'length' => $length,
+    );
+    $content = \local_mediaserver\media_source::safe_job('./record_program.sh', $arguments);
+
+    return local_mediaserver_create_job($filename, $content);
+}
+
+/**
+ * Cancel a scheduled program recording
+ *
+ * @param stdClass $recording
+ * @param string $streamcode
+ * @return bool
+ */
+function local_mediaserver_program_cancel(stdClass $recording, $streamcode) {
+    global $DB;
+
+    $DB->delete_records('local_mediaserver_recording', array('id' => $recording->id));
+    $DB->delete_records('local_mediaserver_stream', array('id' => $recording->stream));
+
+    // Creating a blank file with this extension is enough for the media server.
+    $filename = $streamcode . '.rec-cancel';
+
+    return local_mediaserver_create_job($filename, '');
+}
+
+/**
+ * Test whether a given program is part of a series
+ *
+ * @param stdClass $program
+ * @return bool
+ */
+function local_mediaserver_program_has_series(stdClass $program) {
+    return ($program->series > 0 && $program->episode > 0);
+}
+
+/**
+ * Find all recorded programs matching a given title/series
+ *
+ * @param string $title
+ * @param int $series
+ * @return array
+ */
+function local_mediaserver_series_recordings($title, $series) {
+    global $DB;
+
+    $sql = 'SELECT p.*
+              FROM {local_mediaserver_program} p
+              JOIN {local_mediaserver_recording} r ON r.program = p.id
+             WHERE p.title = :title AND p.series = :series
+          ORDER BY p.timebegin';
+
+    return $DB->get_records_sql($sql, array('title' => $title, 'series' => $series));
+}
+
+/**
+ * Schedule future program recordings for a given series record
+ *
+ * @param stdClass $series
+ * @return int Count of recorded series episodes
+ */
+function local_mediaserver_series_record(stdClass $series) {
+    global $DB;
+
+    // Find already recorded series episodes.
+    $recordedepisodes = array(0);
+
+    $recorded = local_mediaserver_series_recordings($series->title, $series->series);
+    foreach ($recorded as $record) {
+        $recordedepisodes[] = $record->episode;
+    }
+
+    $recordedepisodeinitialcount = (count($recordedepisodes) - 1);
+
+    // Program must begin after the allowed recording buffer time.
+    $recordingwindow = (time() + LOCAL_MEDIASERVER_RECORD_BUFFER);
+
+    $select = 'title = :title AND series = :series AND timebegin > :timebegin';
+    $params = array('title' => $series->title, 'series' => $series->series, 'timebegin' => $recordingwindow);
+
+    // Append SELECT fragment to ignore already recorded episodes.
+    list($episodeselect, $episodeparams) = $DB->get_in_or_equal($recordedepisodes, SQL_PARAMS_NAMED, 'e', false);
+    $select .= ' AND episode ' . $episodeselect;
+    $params = array_merge($params, $episodeparams);
+
+    $programs = $DB->get_records_select('local_mediaserver_program', $select, $params, 'timebegin');
+    foreach ($programs as $program) {
+        // Check if there is an available tuner for program broadcast duration.
+        $tuner = local_mediaserver_program_tuner($program);
+        if ($tuner === false) {
+            continue;
+        }
+
+        // Make sure we don't record the same episode twice.
+        if (array_search($program->episode, $recordedepisodes) === false) {
+            $title = local_mediaserver_program_title_populate($program, $series->format);
+
+            local_mediaserver_program_record($program, $tuner, $series->category, $title, '', $series->userid);
+
+            $recordedepisodes[] = $program->episode;
+        }
+    }
+
+    $recordedepisodecount = (count($recordedepisodes) - 1);
+
+    return ($recordedepisodecount - $recordedepisodeinitialcount);
+}
+
+/**
+ * Extract all program properties that are definied in specified format string, or false
+ * if format contains invalid property
+ *
+ * @param stdClass $program
+ * @param string $format
+ * @return array|false
+ */
+function local_mediaserver_program_format_extract(stdClass $program, $format) {
+    $fields = array();
+
+    if (preg_match_all('/(%[a-z]+)/', $format, $matches) !== false) {
+        foreach ($matches[0] as $property) {
+            // Strip leading % character.
+            $propertyclean = substr($property, 1);
+
+            if (! property_exists($program, $propertyclean)) {
+                return false;
+            }
+
+            $fields[$property] = $program->$propertyclean;
+        }
+    }
+
+    return $fields;
+}
+
+/**
+ * Return a program title using specified format string
+ *
+ * @param stdClass $program
+ * @param string $format
+ * @return string
+ */
+function local_mediaserver_program_title_populate(stdClass $program, $format) {
+    $fields = local_mediaserver_program_format_extract($program, $format);
+
+    if ($fields !== false) {
+        $title = strtr($format, $fields);
+    } else {
+        // Fallback; format string contains invalid properties.
+        $title = $format;
+    }
+
+    return core_text::substr($title, 0, 100);
+}
+
+/**
+ * Return default title for a given program
+ *
+ * @param stdClass $program
+ * @return string
+ */
+function local_mediaserver_program_title_default(stdClass $program) {
+    $format = '%title';
+
+    if (! empty($program->episodetitle)) {
+        $format .= ': %episodetitle';
+    } else if (local_mediaserver_program_has_series($program)) {
+        $format .= ': Part %episode';
+    }
+
+    return local_mediaserver_program_title_populate($program, $format);
+}
+
+/**
+ * Return all channel programs broadcasting in a given time range
+ *
+ * @param int $channelid
+ * @param int $timebegin
+ * @param int $timeend
+ * @return array
+ */
+function local_mediaserver_channel_listing($channelid, $timebegin, $timeend) {
+    global $DB, $USER;
+
+    $fields = local_mediaserver_program_fields();
+
+    // Alias the time arguments so we don't need to add them multiple times to $params.
+    $sql = "SELECT $fields, :timebegin AS testbegin, :timeend AS testend
+              FROM {local_mediaserver_program} p
+         LEFT JOIN {local_mediaserver_recording} r ON r.program = p.id
+         LEFT JOIN {local_mediaserver_favourite} f ON f.title = p.title AND f.userid = :userid
+         LEFT JOIN {local_mediaserver_series} s ON s.title = p.title AND s.series = p.series
+             WHERE p.channel = :channel
+            HAVING p.timebegin BETWEEN testbegin AND testend
+                OR p.timeend BETWEEN testbegin + 1 AND testend
+                OR testbegin BETWEEN p.timebegin AND p.timeend - 1
+          ORDER BY p.timebegin";
+
+    $params = array('channel' => $channelid, 'timebegin' => $timebegin, 'timeend' => $timeend, 'userid' => $USER->id);
+
+    return $DB->get_records_sql($sql, $params);
+}
+
+/**
+ * Return users preferred channels
+ *
+ * @return array
+ */
+function local_mediaserver_user_channels() {
+    global $DB;
+
+    if ($preference = get_user_preferences('local_mediaserver_channels')) {
+        $ids = explode(',', clean_param($preference, PARAM_SEQUENCE));
+
+        return $DB->get_records_list('local_mediaserver_channel', 'id', $ids, 'sortorder');
+    } else {
+        // Fallback to top five channels by sortorder.
+
+        return $DB->get_records('local_mediaserver_channel', null, 'sortorder', '*', 0, 5);
+    }
+}
+
+/**
+ * Generate HTML markup for the media guide search form
+ *
+ * @return string
+ */
+function local_mediaserver_search_form() {
+    global $OUTPUT;
+
+    $output = $OUTPUT->help_icon('searchprograms', 'local_mediaserver');
+
+    // Force the search form to submit when we request it.
+    $params = array(
+        '_qf__local_mediaserver\form\guide_search' => 1,
+        'sesskey' => sesskey(),
+        'timeenddisable' => 1,
+    );
+
+    $action = new local_mediaserver_url('/local/mediaserver/guide/search.php', $params);
+
+    $output .= html_writer::start_tag('form', array('action' => $action->out_omit_querystring(), 'method' => 'post'));
+    $output .= html_writer::input_hidden_params($action);
+    $output .= html_writer::empty_tag('input', array('type' => 'text', 'name' => 'search'));
+    $output .= html_writer::empty_tag('input', array('type' => 'submit', 'value' => get_string('search')));
+    $output .= html_writer::end_tag('form');
+
+    return $output;
+}
+
+/**
+ * Validate callback request came from configured host
+ *
+ * @return boolean
+ */
+function local_mediaserver_valid_host() {
+    $hostname = get_config('local_mediaserver', 'host');
+    $hostaddress = gethostbyname($hostname);
+
+    return address_in_subnet($hostaddress, getremoteaddr());
+}
+
+/**
+ * Validate callback request code/token pair
+ *
+ * @param string $code
+ * @param string $token Base64 encoded SHA1 hash
+ * @return boolean
+ */
+function local_mediaserver_valid_token($code, $token) {
+    $token = base64_decode($token);
+    $token = rtrim($token, "\n");
+
+    $expected = get_config('local_mediaserver', 'token');
+    $expected = hash('sha1', $expected . $code);
+
+    return (strcmp($token, $expected) == 0);
+}
+
+/**
+ * Update frames for a given stream
+ *
+ * @param stdClass $stream
+ * @return void
+ *
+ * @throws invalid_parameter_exception
+ */
+function local_mediaserver_update_frames(stdClass $stream) {
+    // Frames upload data must exist!
+    if (! array_key_exists('frames', $_FILES)) {
+        throw new invalid_parameter_exception('frames');
+    }
+
+    // Create default file record (filename will be populated later).
+    $file = array(
+        'contextid' => context_system::instance()->id,
+        'component' => 'local_mediaserver',
+        'filearea'  => 'frame',
+        'itemid'    => $stream->id,
+        'userid'    => $stream->userid,
+        'filepath'  => '/',
+    );
+
+    $fs = get_file_storage();
+
+    // There must be two frames, indexed (1 => , 2 => ) to uploaded filename.
+    $frames = $_FILES['frames']['tmp_name'];
+    if (count($frames) != 2) {
+        throw new invalid_parameter_exception('frames');
+    }
+
+    // Delete old frames.
+    $fs->delete_area_files($file['contextid'], $file['component'], $file['filearea'], $file['itemid']);
+
+    foreach ($frames as $index => $filepath) {
+        if (is_uploaded_file($filepath)) {
+            $file['filename'] = "f{$index}.png";
+
+            $fs->create_file_from_pathname($file, $filepath);
+        }
+    }
+}
+
+/**
+ * Create a new job for the media server
+ *
+ * @param string $filename
+ * @param string $content
+ * @return bool
+ */
+function local_mediaserver_create_job($filename, $content) {
+    global $CFG;
+
+    $dir = "$CFG->dataroot/media";
+    check_dir_exists($dir, true, false);
+
+    $filename = clean_filename($filename);
+
+    return (file_put_contents("$dir/$filename", $content, LOCK_EX) !== false);
+}

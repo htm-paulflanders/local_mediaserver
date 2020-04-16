@@ -1,0 +1,116 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+namespace local_mediaserver\form;
+
+defined('MOODLE_INTERNAL') || die();
+
+require_once($CFG->libdir . '/formslib.php');
+
+class guide_search extends \moodleform {
+
+    /**
+     * Form definition
+     *
+     * @return void
+     */
+    public function definition() {
+        $mform = $this->_form;
+
+        // Custom data contains a previous search loaded from user session (for paging purposes).
+        list($search) = $this->_customdata;
+        if ($search === null) {
+            $search = new \stdClass;
+        }
+
+        $mform->addElement('header', 'general', get_string('search', 'local_mediaserver'));
+
+        $strsearch = get_string('search');
+
+        $mform->addElement('text', 'search', $strsearch);
+        $mform->setType('search', PARAM_NOTAGS);
+        $mform->addRule('search', null, 'required');
+        $mform->addHelpButton('search', 'search', 'local_mediaserver');
+
+        $mform->addElement('advcheckbox', 'ownchannels', get_string('searchownchannels', 'local_mediaserver'));
+        $mform->setAdvanced('ownchannels');
+
+        $mform->addElement('advcheckbox', 'recorded', get_string('searchrecorded', 'local_mediaserver'));
+        $mform->setAdvanced('recorded');
+
+        $timebegin = array();
+        $timebegin[] = $mform->createElement('date_selector', 'timebegin');
+        $timebegin[] = $mform->createElement('advcheckbox', 'timebegindisable', null, get_string('disable'));
+        $mform->addGroup($timebegin, 'timebegingroup', get_string('channelbegin', 'local_mediaserver'), null, false);
+        $mform->disabledIf('timebegingroup', 'timebegindisable', 'checked');
+
+        $timeend = array();
+        $timeend[] = $mform->createElement('date_selector', 'timeend');
+        $timeend[] = $mform->createElement('advcheckbox', 'timeenddisable', null, get_string('disable'));
+        $mform->addGroup($timeend, 'timeendgroup', get_string('channelend', 'local_mediaserver'), null, false);
+        $mform->disabledIf('timeendgroup', 'timeenddisable', 'checked');
+
+        $genres = $this->popular_genres();
+        if (count($genres) > 0) {
+            $genre = array();
+            foreach ($genres as $index => $name) {
+                $genre[] = $mform->createElement('advcheckbox', 'gr' . $index, null, $name, null, array(0, $name));
+            }
+
+            $mform->addGroup($genre, 'genre', get_string('genre', 'local_mediaserver'), ' ');
+            $mform->setType('genre', PARAM_NOTAGS);
+            $mform->setAdvanced('genre');
+        }
+
+        $this->add_action_buttons(true, $strsearch);
+
+        // Advanced checkbox element used for genre select doesn't handle 'empty' array, so reset it.
+        unset($search->genre);
+        $search->genre = optional_param_array('genre', [], PARAM_NOTAGS);
+
+        $this->set_data($search);
+    }
+
+    /**
+     * Return most popular recorded program genres
+     *
+     * @return array
+     */
+    private function popular_genres() {
+        global $DB;
+
+        $notempty = $DB->sql_isnotempty(null, 'p.genre', false, false);
+
+        $sql = 'SELECT p.genre
+                  FROM {local_mediaserver_program} p
+                  JOIN {local_mediaserver_recording} r ON r.program = p.id
+                 WHERE ' . $notempty . '
+              GROUP BY p.genre ASC
+              ORDER BY COUNT(p.genre) DESC';
+
+        $genres = $DB->get_records_sql_menu($sql, null, 0, 14);
+        \core_collator::ksort($genres);
+
+        return array_keys($genres);
+    }
+}

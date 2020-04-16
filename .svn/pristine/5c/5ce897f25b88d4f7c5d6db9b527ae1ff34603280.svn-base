@@ -1,0 +1,59 @@
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+M.local_mediaserver_player = M.local_mediaserver_player || {};
+
+/**
+ * Initialize media server player UI
+ *
+ * @param {YUI} Y
+ * @param {String} frame
+ * @param {String} stream
+ */
+M.local_mediaserver_player.initialize = function(Y, frame, stream) {
+    flowplayer('stream-container', M.cfg.wwwroot + '/lib/flowplayer/flowplayer-3.2.18.swf', {
+        plugins: {
+            rtmp: {
+               url: M.cfg.wwwroot + '/local/mediaserver/flowplayer/flowplayer.rtmp-3.2.13.swf',
+               netConnectionUrl: 'rtmp://' + M.local_mediaserver_player.cfg.host + '/' + M.local_mediaserver_player.cfg.app,
+               durationFunc: 'getStreamLength'
+            },
+            controls: {
+                fullscreen: true,
+                height: 30,
+                autoHide: true
+            }
+        },
+        playlist: [
+            {
+                url: M.cfg.wwwroot + frame, 
+                scaling: 'fit'
+            },
+            {
+                provider: 'rtmp',
+                url: stream,
+                scaling: 'fit',
+                autoPlay: false
+            }
+        ]
+    });
+};

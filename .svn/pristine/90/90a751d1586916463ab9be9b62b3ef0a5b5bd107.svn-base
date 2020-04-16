@@ -1,0 +1,181 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+require(dirname(dirname(dirname(__FILE__))) . '/config.php');
+require_once($CFG->libdir . '/tablelib.php');
+require_once($CFG->dirroot . '/local/mediaserver/lib.php');
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+$categoryid = optional_param('id', 0, PARAM_INT);
+$page = optional_param('page', 0, PARAM_INT);
+$move = optional_param_array('move', null, PARAM_INT);
+$confirm = optional_param('confirm', false, PARAM_BOOL);
+
+$context = context_system::instance();
+
+require_login(SITEID, false);
+require_capability('local/mediaserver:view', $context);
+
+$PAGE->set_context($context);
+$PAGE->set_pagelayout('standard');
+$PAGE->set_url(new local_mediaserver_url('/local/mediaserver/index.php', array('id' => $categoryid, 'page' => $page)));
+$PAGE->set_title(get_string('pluginname', 'local_mediaserver'));
+
+$action = new local_mediaserver_url('/local/mediaserver/search.php');
+$PAGE->set_button(local_mediaserver_search_form($action));
+
+if ($categoryid) {
+    $category = $DB->get_record('local_mediaserver_category', array('id' => $categoryid), '*', MUST_EXIST);
+} else {
+    // Create a 'fake' root category object.
+    $category = new stdClass;
+    $category->id = 0;
+    $category->path = '/';
+    $category->depth = 0;
+}
+
+// Are we viewing the root category?
+$rootcategory = ($category->id == 0);
+
+// Populate navigation breadcrumbs.
+if (! $rootcategory) {
+    $parents = local_mediaserver_category_breadcrumbs($category);
+    array_pop($parents);
+
+    foreach ($parents as $parent) {
+        $PAGE->navbar->add($parent->name, new local_mediaserver_url('/local/mediaserver/index.php', array('id' => $parent->id)));
+    }
+
+    $PAGE->navbar->add($category->name);
+}
+
+// Test whether we are moving streams.
+if (count($move) > 0) {
+    $SESSION->local_mediaserver_move = $move;
+}
+$moving = isset($SESSION->local_mediaserver_move);
+
+if ($moving && $confirm) {
+    require_sesskey();
+
+    list($select, $params) = $DB->get_in_or_equal($SESSION->local_mediaserver_move, SQL_PARAMS_NAMED, 's');
+    if (! has_capability('local/mediaserver:edit', $context)) {
+        $select .= ' AND userid = :userid';
+        $params['userid'] = $USER->id;
+    }
+
+    local_mediaserver_streams_move($category->id, 'id ' . $select, $params);
+
+    unset($SESSION->local_mediaserver_move);
+
+    redirect($PAGE->url);
+}
+
+echo $OUTPUT->header();
+
+$canaddcategory = has_capability('local/mediaserver:add', $context);
+if ($rootcategory) {
+    $canaddcategory &= has_capability('local/mediaserver:addrootcategories', $context);
+} else {
+    echo $OUTPUT->heading($category->name, 3);
+}
+
+$table = new flexible_table('local_mediaserver_category');
+$table->define_columns(array('name', 'count', 'actions'));
+$table->define_headers(array(get_string('name'), '', ''), null);
+$table->define_baseurl($PAGE->url);
+$table->setup();
+
+$viewurl = new local_mediaserver_url('/local/mediaserver/index.php');
+$editurl = new local_mediaserver_url('/local/mediaserver/admin/category_edit.php');
+$deleteurl = fullclone($editurl);
+$deleteurl->param('delete', 1);
+
+if ($children = local_mediaserver_category_children($category)) {
+    foreach ($children as $child) {
+        $viewurl->param('id', $child->id);
+        $editurl->param('id', $child->id);
+        $deleteurl->param('id', $child->id);
+
+        $icons = array();
+        if ($canaddcategory) {
+            $icons[] = $OUTPUT->action_icon($editurl, new pix_icon('t/edit', get_string('editcategorythis'), 'core', array('class' => 'iconsmall')));
+            $icons[] = $OUTPUT->action_icon($deleteurl, new pix_icon('t/delete', get_string('delete'), 'core', array('class' => 'iconsmall')));
+        }
+
+        $childcount = local_mediaserver_category_count($child);
+
+        $row = array(
+            $OUTPUT->action_link($viewurl, $child->name),
+            number_format($childcount),
+            implode(' ', $icons),
+        );
+
+        $table->add_data($row);
+    }
+
+    $table->print_html();
+}
+
+if ($moving) {
+    $moveconfirm = new local_mediaserver_url('/local/mediaserver/index.php', array('id' => $category->id, 'confirm' => 1));
+
+    echo $OUTPUT->single_button($moveconfirm, get_string('movehere'), 'post', array('class' => 'continuebutton'));
+
+    echo $OUTPUT->footer();
+    die;
+} else if ($canaddcategory) {
+    $createurl = new local_mediaserver_url('/local/mediaserver/admin/category_edit.php', array('parent' => $category->id));
+
+    echo $OUTPUT->single_button($createurl, get_string('addnewcategory'), 'get', array('class' => 'continuebutton'));
+}
+
+$params = array('category' => $category->id, 'done' => 1);
+if ($streams = $DB->get_records('local_mediaserver_stream', $params, 'title', '*', $page * LOCAL_MEDIASERVER_MEDIA_PAGING, LOCAL_MEDIASERVER_MEDIA_PAGING)) {
+
+    // If user can add content, we need to provide a form to move streams.
+    if ($canaddcontent = has_capability('local/mediaserver:add', $context)) {
+        echo html_writer::start_tag('form', array('action' => $PAGE->url->out_omit_querystring(), 'method' => 'post'));
+        echo html_writer::input_hidden_params($PAGE->url);
+    }
+
+    foreach ($streams as $stream) {
+        echo local_mediaserver_stream_preview($stream);
+    }
+
+    if ($canaddcontent) {
+        echo html_writer::start_tag('div', array('class' => 'continuebutton'));
+        echo html_writer::empty_tag('input', array('type' => 'submit', 'value' => get_string('move')));
+        echo html_writer::end_tag('div');
+        echo html_writer::end_tag('form');
+    }
+
+    $totalcount = $DB->count_records('local_mediaserver_stream', $params);
+    $pagingbar = new paging_bar($totalcount, $page, LOCAL_MEDIASERVER_MEDIA_PAGING, $PAGE->url);
+
+    echo $OUTPUT->render($pagingbar);
+} else {
+    echo $OUTPUT->heading(get_string('nothingtodisplay'), 3);
+}
+
+echo $OUTPUT->footer();

@@ -1,0 +1,1 @@
+YUI.add("moodle-local_mediaserver-today",function(e,t){M.local_mediaserver=M.local_mediaserver||{};var n="Today",r=".block_fake li a",i;i=function(){var e={selector:r};i.superclass.constructor.apply(this,[e])},e.extend(i,M.local_mediaserver.guide,{},{NAME:n}),M.local_mediaserver.today=function(){return new i}},"@VERSION@",{requires:["moodle-local_mediaserver-guide"]});

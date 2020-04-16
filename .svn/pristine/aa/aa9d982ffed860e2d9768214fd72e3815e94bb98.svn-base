@@ -1,0 +1,83 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+define('CLI_SCRIPT', true);
+
+require_once(__DIR__ . '/../../../config.php');
+require_once($CFG->libdir . '/clilib.php');
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+// Ensure errors are well explained.
+set_debugging(DEBUG_DEVELOPER, true);
+
+// Now get cli options.
+list($options, $unrecognized) = cli_get_params(array('help' => false, 'channel' => false), array('h' => 'help', 'c' => 'channel'));
+
+if ($unrecognized) {
+    $unrecognized = implode("\n  ", $unrecognized);
+    cli_error(get_string('cliunknowoption', 'admin', $unrecognized));
+}
+
+if ($options['help']) {
+    $help =
+"Updates schedule data for a given channel.
+
+Options:
+-c, --channel         Channel ID
+-h, --help            Print out this help
+
+Example:
+\$ sudo -u www-data /usr/bin/php local/mediaserver/cli/schedule_update.php --channel=123
+";
+
+    echo $help;
+    die;
+}
+
+if (empty($options['channel'])) {
+    cli_error('You must provide a channel ID (see --help)');
+}
+
+// Only process enabled channels.
+$select = 'id = :id AND (hourbegin > 0 OR hourend > 0)';
+$channel = $DB->get_record_select('local_mediaserver_channel', $select, array('id' => $options['channel']), '*', MUST_EXIST);
+
+$time = time();
+
+// Don't continue if we already have schedule data.
+$select = 'channel = :channel AND timebegin > :time';
+$params = array('channel' => $channel->id, 'time' => $time);
+if ($DB->record_exists_select('local_mediaserver_program', $select, $params)) {
+    cli_error('Channel already has future schedule data');
+}
+
+$programs = local_mediaserver_schedule_download($channel, $time);
+
+$log = sprintf('Downloaded %d programmes for channel \'%s\'', count($programs), $channel->name);
+mtrace($log);
+
+foreach ($programs as $program) {
+    $DB->insert_record('local_mediaserver_program', $program);
+}
+
+exit(0);

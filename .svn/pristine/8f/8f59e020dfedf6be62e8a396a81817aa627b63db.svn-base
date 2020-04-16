@@ -1,0 +1,107 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+require(dirname(dirname(dirname(__FILE__))) . '/config.php');
+require_once($CFG->libdir . '/searchlib.php');
+require_once($CFG->dirroot . '/local/mediaserver/lib.php');
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+$search = required_param('search', PARAM_NOTAGS);
+$page = optional_param('page', 0, PARAM_INT);
+
+$context = context_system::instance();
+
+require_login(SITEID, false);
+require_capability('local/mediaserver:view', $context);
+
+$browse = new local_mediaserver_url('/local/mediaserver/index.php');
+
+$strsearch = get_string('search');
+$strtitle = get_string('pluginname', 'local_mediaserver') . ': ' . $strsearch;
+
+$PAGE->set_context($context);
+$PAGE->set_pagelayout('standard');
+$PAGE->set_url(new local_mediaserver_url('/local/mediaserver/search.php', array('search' => $search, 'page' => $page)));
+$PAGE->set_title($strtitle);
+
+$action = new local_mediaserver_url($PAGE->url->out_omit_querystring());
+$PAGE->set_button(local_mediaserver_search_form($action, 'get', $search));
+
+$PAGE->navbar->add($strsearch);
+navigation_node::override_active_url($browse);
+
+echo $OUTPUT->header();
+
+$search = str_replace('title:', 'subject:', trim($search));
+if (! $search) {
+    print_error('missingparam', '', '', 'search');
+}
+
+$parser = new search_parser();
+$lexer = new search_lexer($parser);
+
+if ($lexer->parse($search)) {
+    $parsetree = $parser->get_parsed_array();
+
+    // Data fields contain searchable data in addition to the stream title (meta field).
+    $separator = "'|'";
+    $programfields = $DB->sql_concat_join($separator, array('p.title', 'p.episodetitle', 'p.description'));
+    $datafields = $DB->sql_concat_join($separator, array('s.description', 'COALESCE(' . $programfields . ', ' . $separator . ')')); 
+
+    list($select, $conditions) = search_generate_sql($parsetree, $datafields, 's.title', 's.userid', 'u.id', 'u.firstname', 'u.lastname', 's.submitted', 's.id');
+
+    // Nasty hack to decode $conditions, as the search parser has passed all tokens through htmlspecialchars.
+    array_walk($conditions, function(&$value, $key) {
+        $value = htmlspecialchars_decode($value);
+    });
+
+    $fields = 's.*, ' . get_all_user_name_fields(true, 'u');
+
+    $sql = "SELECT $fields
+              FROM {local_mediaserver_stream} s
+              JOIN {user} u ON u.id = s.userid
+         LEFT JOIN {local_mediaserver_recording} r ON r.stream = s.id
+         LEFT JOIN {local_mediaserver_program} p ON p.id = r.program
+             WHERE done = :done AND $select
+          ORDER BY s.title, s.id";
+
+    $conditions['done'] = 1;
+
+    if ($streams = $DB->get_records_sql($sql, $conditions, $page * LOCAL_MEDIASERVER_MEDIA_PAGING, LOCAL_MEDIASERVER_MEDIA_PAGING)) {
+        $sqlcount = str_replace($fields, 'COUNT(*)', $sql);
+        $totalcount = $DB->count_records_sql($sqlcount, $conditions);
+
+        echo $OUTPUT->heading(get_string('searchfound', 'local_mediaserver', $totalcount), 3);
+
+        foreach ($streams as $stream) {
+            echo local_mediaserver_stream_preview($stream);
+        }
+
+        $pagingbar = new paging_bar($totalcount, $page, LOCAL_MEDIASERVER_MEDIA_PAGING, $PAGE->url);
+        echo $OUTPUT->render($pagingbar);
+    } else {
+        echo $OUTPUT->heading(get_string('nothingtodisplay'), 3);
+    }
+}
+
+echo $OUTPUT->footer();

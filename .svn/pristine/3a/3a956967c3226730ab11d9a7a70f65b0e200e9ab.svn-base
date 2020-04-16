@@ -1,0 +1,8 @@
+{
+    "moodle-local_mediaserver-calendar": {
+        "requires": [
+            "base",
+            "node"
+        ]
+    }
+}

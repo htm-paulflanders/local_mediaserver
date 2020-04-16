@@ -1,0 +1,318 @@
+/* $Id$ */
+
+/* View media stream page */
+
+#page-media-view #streamcontainer {
+    border: 1px solid #999;
+    height: 300px;
+    width: 400px;
+}
+
+/* Renderer page regions */
+
+.path-media-guide #guide-region-main {
+    margin-left: 0;
+}
+
+.path-media-guide #guide-region-main h3 {
+    text-align: center;
+}
+
+.path-media-guide #block_fake_calendar #calendar-popup-link {
+    position: relative;
+    top: -2px;
+    margin-left: 6px;
+}
+
+.path-media-guide #block_fake_calendar #calendar-popup-container {
+    background-color: #F3F4E6;
+    border: 1px solid #999;
+    border-radius: 4px;
+    box-shadow: 1px 1px 4px #444;
+    padding: 10px 6px 0 6px;
+    display: none;
+    position: absolute;
+    z-index: 1000;
+}
+
+.path-media-guide #block_fake_calendar .daypadding a {
+    color: #BBB;
+}
+
+.path-media-guide #block_fake_calendar .dayselected {
+    font-weight: bold;
+    border: 1px dotted #999;
+}
+
+.path-media-guide #block_fake_today ul {
+    font-size: 0.8em;
+
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 146px;
+    overflow-y: auto;
+}
+
+.path-media-guide #block_fake_today li {
+    border-bottom: 1px solid #E7E7DD;
+    white-space: nowrap;
+    overflow: hidden;
+    padding: 2px 6px;
+}
+
+.path-media-guide #block_fake_today li:last-of-type {
+    border-bottom: 0;
+}
+
+.path-media-guide #block_fake_today a {
+    display: block;
+    color: inherit;
+    border-bottom: 1px dotted #999;
+    text-decoration: none;
+}
+
+/* Program information */
+
+.path-media-guide .program {
+    font-size: 0.8em !important;
+
+    background-color: #F3F4E6;
+    border: 1px solid #999;
+    width: 440px;
+    margin: 0 auto 10px;
+    padding: 4px;
+}
+
+.path-media-guide .program a {
+    color: inherit;
+    border-bottom: 1px dotted #555;
+}
+
+.path-media-guide .program a:link {
+    text-decoration: none;
+}
+
+.path-media-guide .program img {
+    float: left;
+    border: 1px solid #555;
+    margin: 4px 4px 0 0;
+    height: 60px;
+    width: 80px;
+}
+
+.path-media-guide .program .title {
+    background-color: #E7E7DD;
+}
+
+.path-media-guide .program .title,
+.path-media-guide .program .series {
+    clear: left;
+    text-align: center;
+    font-weight: bold;
+}
+
+.path-media-guide .program .program-info {
+    float: left;
+    list-style: circle outside none;
+    margin: 2px 2px 2px 18px;
+}
+
+.path-media-guide .program .program-description {
+    clear: left;
+}
+
+.path-media-guide .program .search-match {
+    color: #000;
+    white-space: nowrap;
+    border-bottom: 2px dotted #E68A00;
+}
+
+.path-media-guide .program .program-actions {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    text-align: center;
+    display: block;
+    background-color: #FFF;
+    border: 1px solid #999;
+    border-radius: 4px;
+}
+
+.path-media-guide .program .program-actions li {
+    display: inline-block;
+}
+
+.path-media-guide .program .program-actions .singlebutton,
+.path-media-guide .program .program-actions .singlebutton div {
+    margin: 0;
+}
+
+.path-media-guide .program .program-actions input[type="submit"] {
+    margin: 6px 0;
+}
+
+.path-media-guide .program-old {
+    color: #555;
+}
+
+/* Media guide programs */
+.path-media-guide .program-recorded .title,
+#page-media-guide-index .program-recorded {
+    color: #FFF;
+    background-color: #F19595 !important;
+}
+
+.path-media-guide .program-favourite .title,
+#page-media-guide-index .program-favourite {
+    background-color: #D3EC8F !important;
+}
+
+.path-media-guide .program-series .title,
+#page-media-guide-index .program-series {
+    background-color: #F5D49A !important;
+}
+
+/* Media guide search breadcrumb button */
+
+.path-media-guide .breadcrumb-button .helptooltip {
+    position: relative;
+    top: -4px;
+}
+
+.path-media-guide .breadcrumb-button form {
+    display: inline;
+}
+
+.path-media-guide .breadcrumb-button input[type="text"] {
+    width: 160px;
+}
+
+/* Media guide */
+
+#page-media-guide-index .guide-row {
+    font-size: 0.8em !important;
+
+    border: 1px solid #999;
+    border-bottom-width: 0;
+    background-color: #E7E7DD;
+    list-style: none;
+    position: relative;
+    clear: top;
+    width: 810px;
+    margin: 0 auto;
+}
+
+#page-media-guide-index .guide-row li {
+    background-color: #F3F4E6;
+    border-left: 1px solid #999;
+    border-right: 1px solid #999;
+    display: inline-block;
+    float: left;
+    overflow: hidden;
+    height: inherit;
+    margin: 0;
+}
+
+#page-media-guide-index .guide-time {
+    height: 22px;
+}
+
+#page-media-guide-index .guide-time li {
+    position: relative;
+    width: 4.16%;
+    border: 0;
+}
+
+#page-media-guide-index .guide-time li a {
+    display: block;
+    text-align: center;
+    height: 20px;
+}
+
+#page-media-guide-index .guide-time .hour-selected {
+    font-weight: bold;
+    border: 1px dotted #999;
+}
+
+#page-media-guide-index .guide-channel {
+    height: 44px;
+}
+
+#page-media-guide-index .guide-channel li {
+    position: absolute;
+    padding: 0 4px;
+}
+
+#page-media-guide-index .guide-channel li a {
+    color: inherit;
+    border-bottom: 1px dotted #999;
+    text-decoration: none;
+}
+
+#page-media-guide-index .guide-channel .icon {
+    width: 50px;
+    padding: 0 !important;
+    border-left: 0 !important;
+}
+
+#page-media-guide-index .guide-channel .icon img {
+    width: 100%;
+    height: 100%;
+}
+
+#page-media-guide-index .guide-channel .program-tiny {
+    padding: 0;
+}
+
+#page-media-guide-index .guide-channel:last-of-type {
+    border-bottom-width: 1px;
+    margin-bottom: 20px;
+}
+
+#page-media-guide-index #program-hover {
+    font-size: 0.8em !important;
+
+    left: -1000em;
+    top: -1000em;
+    background-color: #F3F4E6;
+    border: 1px solid #999;
+    border-radius: 4px;
+    box-shadow: 1px 1px 4px #444;
+    width: 210px;
+    max-height: 240px;
+    overflow: hidden;
+    position: absolute;
+    z-index: 1000;
+    padding: 2px 4px;
+}
+
+/* Media guide search */
+
+#page-media-guide-search #fgroup_id_genre span {
+    white-space: nowrap;
+    margin-left: 2px;
+}
+
+#page-media-guide-search #fgroup_id_genre span input[type="checkbox"] {
+    margin-right: 3px;
+}
+
+/* Media guide my channels */
+
+#page-media-guide-mychannels .channels-choose {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#page-media-guide-mychannels .channels-choose li {
+    float: left;
+    border: 1px solid #999;
+    padding: 2px;
+    margin: 3px 6px;
+}
+
+#page-media-guide-mychannels input[type="submit"] {
+    margin-top: 20px;
+}

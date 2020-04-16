@@ -1,0 +1,124 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+namespace local_mediaserver;
+
+defined('MOODLE_INTERNAL') || die();
+
+// Define the XMLTV program fields.
+define('XMLTV_TITLE',        0);
+define('XMLTV_SERIES',       1);
+define('XMLTV_EPISODE',      2);
+define('XMLTV_GENRE',       16);
+define('XMLTV_DESCRIPTION', 17);
+define('XMLTV_DATE',        19);
+define('XMLTV_TIME',        20);
+define('XMLTV_DURATION',    22);
+
+class xmltv_download implements \Iterator {
+    /** @const string XMLTV URL format. */
+    const XMLTV_FORMAT = 'http://xmltv.radiotimes.com/xmltv/%d.dat';
+
+    /** @var int Channel programs iterator. */
+    private $index = 0;
+    /** @var array Channel programs. */
+    private $programs = array();
+
+    /** @var array Subset of program fields we're interested in. */
+    private $fields = array(
+        XMLTV_TITLE, XMLTV_SERIES, XMLTV_EPISODE, XMLTV_GENRE, XMLTV_DESCRIPTION, XMLTV_DATE, XMLTV_TIME, XMLTV_DURATION,
+    );
+
+    /**
+     * Class constructor
+     *
+     * @param int $datafile XMLTV channel ID
+     */
+    public function __construct($datafile) {
+        $xmltv = sprintf(self::XMLTV_FORMAT, $datafile);
+
+        $response = download_file_content($xmltv, null, null, true);
+        if ($response->status == 200) {
+            $file = explode("\n", $response->results);
+
+            foreach ($file as $line) {
+                $program = explode('~', $line);
+
+                // Each program should have 23 fields.
+                if (count($program) == 23) {
+                    // But we're only interested in a subset of them.
+                    $program = array_intersect_key($program, array_flip($this->fields));
+
+                    array_push($this->programs, $program);
+                }
+            }
+        }
+
+        $this->index = 0;
+    }
+
+    /**
+     * Returns current program
+     *
+     * @return array
+     */
+    public function current() {
+        return $this->programs[$this->index];
+    }
+
+    /**
+     * Returns the index of current program
+     *
+     * @return int
+     */
+    public function key() {
+        return $this->index;
+    }
+
+    /**
+     * Moves forward to next program
+     *
+     * @return void
+     */
+    public function next() {
+        ++$this->index;
+    }
+
+    /**
+     * Rewinds back to the first program
+     *
+     * @return void
+     */
+    public function rewind() {
+        $this->index = 0;
+    }
+
+    /**
+     * Did we reach the end?
+     *
+     * @return boolean
+     */
+    public function valid() {
+        return isset($this->programs[$this->index]);
+    }
+}

@@ -1,0 +1,178 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id: media_schedule.php 4630 2017-06-13 14:09:33Z pholden $
+ */
+
+namespace local_mediaserver;
+
+defined('MOODLE_INTERNAL') || die();
+
+require_once($CFG->libdir . '/filelib.php');
+
+abstract class media_schedule extends media_base implements \Iterator, \Countable {
+    /** @var array Channel programs. */
+    protected $programs = array();
+
+    /** @var int Channel programs iterator. */
+    protected $index = 0;
+
+    /**
+     * Returns current program
+     *
+     * @return array
+     */
+    public function current() {
+        return $this->programs[$this->index];
+    }
+
+    /**
+     * Returns the index of current program
+     *
+     * @return int
+     */
+    public function key() {
+        return $this->index;
+    }
+
+    /**
+     * Moves forward to next program
+     *
+     * @return void
+     */
+    public function next() {
+        ++$this->index;
+    }
+
+    /**
+     * Rewinds back to the first program
+     *
+     * @return void
+     */
+    public function rewind() {
+        $this->index = 0;
+    }
+
+    /**
+     * Did we reach the end?
+     *
+     * @return boolean
+     */
+    public function valid() {
+        return isset($this->programs[$this->index]);
+    }
+
+    /**
+     * Return count of downloaded programs
+     *
+     * @return int
+     */
+    public function count() {
+        return count($this->programs);
+    }
+
+    /**
+     * Perform a request to a given URL with optional POST data
+     *
+     * @param string $url
+     * @param mixed $postdata
+     * @param array $headers
+     * @return string
+     *
+     * @throws \local_mediaserver\exception\media_schedule_exception For unsuccessful response status
+     */
+    protected function request($url, $postdata = null, array $headers = null) {
+        $response = download_file_content($url, $headers, $postdata, true);
+
+        if ($response->status != 200) {
+            throw new exception\media_schedule_exception($response);
+        }
+
+        return $response->results;
+    }
+
+    /**
+     * Sort program data by timebegin (some schedule plugins may process data in some other order)
+     *
+     * @return void
+     */
+    public function sort() {
+        \core_collator::asort_objects_by_property($this->programs, 'timebegin', \core_collator::SORT_NUMERIC);
+
+        // We need to re-index the programs array so calling code iterates over them in the same order.
+        $this->programs = array_merge($this->programs);
+    }
+
+    /**
+     * Download schedule data; must be implemented in child classes
+     *
+     * @param string $configuration Channel configuration (specific to each sub-plugin)
+     * @param int $start
+     * @param int $finish
+     * @return void
+     *
+     * @throws coding_exception
+     */
+    public function download($configuration, $start, $finish) {
+        throw new \coding_exception($this->get_name() . ' media schedule must implement download() method');
+    }
+
+    /**
+     * If program title starts with timezone identifier, strip it out i.e. "(GMT) Guitar Heroes at the BBC"
+     *
+     * @param string $title Program title
+     * @return string
+     */
+    public static function clean_program_title($title) {
+        $timezones = array('GMT', 'BST');
+
+        $match = '/^\((' . implode('|', $timezones) . ')\)/';
+        $title = preg_replace($match, '', $title);
+
+        $title = shorten_text($title, 100, false, null);
+
+        return trim($title);
+    }
+
+    /**
+     * If episode starts or ends with the program title, strip it out
+     *
+     * @param string $title Program title
+     * @param string $episode Episode title
+     * @return string
+     */
+    public static function clean_episode_title($title, $episode) {
+        // Shortcut if episode is empty or the same as title.
+        if (empty($episode) or strcasecmp($title, $episode) == 0) {
+            return '';
+        }
+
+        // Remove the following characters surrounding program title.
+        $chars = preg_quote(': -');
+        $title = preg_quote($title, '/');
+
+        $match = array("/(^$title)[$chars]+/i", "/[$chars]+($title\$)/i");
+        $episode = preg_replace($match, '', $episode);
+
+        $episode = shorten_text($episode, 100, false, null);
+
+        return ucfirst(trim($episode));
+    }
+}

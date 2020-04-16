@@ -1,0 +1,169 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+require(dirname(dirname(dirname(dirname(__FILE__)))) . '/config.php');
+require_once($CFG->libdir . '/searchlib.php');
+require_once($CFG->dirroot . '/local/mediaserver/lib.php');
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+$page = optional_param('page', 0, PARAM_INT);
+
+$context = context_system::instance();
+
+require_login(SITEID, false);
+require_capability('local/mediaserver:viewepg', $context);
+
+$guide = new local_mediaserver_url('/local/mediaserver/guide/index.php');
+
+$strsearch = get_string('search');
+$strtitle = get_string('sourceepg', 'local_mediaserver') . ': ' . $strsearch;
+
+$PAGE->set_context($context);
+$PAGE->set_pagelayout('admin');
+$PAGE->set_url(new local_mediaserver_url('/local/mediaserver/guide/search.php', array('page' => $page)));
+$PAGE->set_title($strtitle);
+
+$PAGE->navbar->add($strsearch);
+navigation_node::override_active_url($guide);
+
+// Search object is for loading previous search submission from users' session, for paging.
+$search = null;
+if (property_exists($SESSION, 'local_mediaserver_search')) {
+    $search = unserialize($SESSION->local_mediaserver_search);
+}
+
+$mform = new \local_mediaserver\form\guide_search(null, array($search));
+
+if ($mform->is_cancelled()) {
+    redirect($guide);
+} else if ($data = $mform->get_data()) {
+    // Store search data in session, to allow for paging.
+    $search = $data;
+
+    $SESSION->local_mediaserver_search = serialize($search);
+}
+
+echo $OUTPUT->header();
+
+$mform->display();
+
+// Check we have a search object to use.
+if ($search !== null) {
+    // Use some of the form fields to build the actual search query (using title: instead of subject: for the meta field token).
+    $searchquery = str_replace('title:', 'subject:', $search->search);
+
+    if (! $search->timebegindisable) {
+        $searchquery .= ' datefrom:' . $search->timebegin;
+    }
+    if (! $search->timeenddisable) {
+        $searchquery .= ' dateto:' . ($search->timeend + DAYSECS - 1);
+    }
+}
+
+if ($searchquery) {
+    $parser = new search_parser();
+    $lexer = new search_lexer($parser);
+
+    if ($lexer->parse($searchquery)) {
+        $parsetree = $parser->get_parsed_array();
+        $searchterms = array();
+
+        // Data fields contain searchable data in addition to the program title (meta field).
+        $datafields = $DB->sql_concat_join("' '", array('p.episodetitle', 'p.description'));
+        list($select, $conditions) = search_generate_sql($parsetree, $datafields, 'p.title', 'p.id', 0, '', '', 'p.timebegin', 0);
+
+        // Nasty hack to decode $conditions, as the search parser has passed all tokens through htmlspecialchars.
+        array_walk($conditions, function(&$value, $key) {
+            $value = htmlspecialchars_decode($value);
+        });
+
+        // Limit search to programs broadcast on users preferred channels.
+        if ($search->ownchannels) {
+            $channels = local_mediaserver_user_channels();
+            $channelids = array_keys($channels);
+
+            list($selectchannel, $conditionschannel) = $DB->get_in_or_equal($channelids, SQL_PARAMS_NAMED, 'c');
+
+            $select .= ' AND channel ' . $selectchannel;
+            $conditions = array_merge($conditions, $conditionschannel);
+        }
+
+        // Limit search to program recordings.
+        if ($search->recorded) {
+            $select .= ' AND r.stream > 0';
+        }
+
+        // Limit search to programs with selected genres.
+        if (! empty($search->genre)) {
+            $genres = array_keys($search->genre);
+
+            list($selectgenre, $conditionsgenre) = $DB->get_in_or_equal($genres, SQL_PARAMS_NAMED, 'g');
+
+            $select .= ' AND genre ' . $selectgenre;
+            $conditions = array_merge($conditions, $conditionsgenre);
+        }
+
+        // The fields we want to return from our query.
+        $fields = local_mediaserver_program_fields();
+
+        $sql = "SELECT $fields
+                  FROM {local_mediaserver_program} p
+             LEFT JOIN {local_mediaserver_recording} r ON r.program = p.id
+             LEFT JOIN {local_mediaserver_favourite} f ON f.title = p.title AND f.userid = :userid
+             LEFT JOIN {local_mediaserver_series} s ON s.title = p.title AND s.series = p.series
+                 WHERE $select
+              ORDER BY p.timebegin";
+
+        $conditions['userid'] = $USER->id;
+
+        $sqlcount = str_replace($fields, 'COUNT(*)', $sql);
+
+        $programcount = $DB->count_records_sql($sqlcount, $conditions);
+        echo $OUTPUT->heading(get_string('searchfound', 'local_mediaserver', $programcount), 3);
+
+        if ($programs = $DB->get_records_sql($sql, $conditions, $page * LOCAL_MEDIASERVER_MEDIA_PAGING, LOCAL_MEDIASERVER_MEDIA_PAGING)) {
+            $renderer = $PAGE->get_renderer('local_mediaserver', 'guide');
+
+            // Build search terms from search_parser returned array.
+            foreach ($parsetree as $token) {
+                $type = $token->getType();
+
+                // Only interested in text search terms.
+                if (in_array($type, array(TOKEN_META, TOKEN_EXACT, TOKEN_STRING))) {
+                    $searchterm = htmlspecialchars_decode($token->getValue());
+                    $searchterms[] = '/(' . preg_quote($searchterm, '/') . ')/i';
+                }
+            }
+
+            foreach ($programs as $program) {
+                echo $renderer->output_program($program, $program->timebegin, $searchterms);
+            }
+        }
+
+        $pagingbar = new paging_bar($programcount, $page, LOCAL_MEDIASERVER_MEDIA_PAGING, $PAGE->url);
+
+        echo $OUTPUT->render($pagingbar);
+    }
+}
+
+echo $OUTPUT->footer();

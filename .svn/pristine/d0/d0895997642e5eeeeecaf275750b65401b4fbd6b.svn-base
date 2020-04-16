@@ -1,0 +1,88 @@
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+M.local_mediaserver_guide = M.local_mediaserver_guide || {};
+
+/**
+ * Initialize media server guide UI
+ *
+ * @param {YUI} Y
+ */
+M.local_mediaserver_guide.initialize = function(Y) {
+    M.local_mediaserver_guide.Y = Y;
+
+    M.local_mediaserver_guide.popup = M.local_mediaserver_guide.Y.one('#program-hover');
+
+    M.local_mediaserver_guide.Y.all('.guide-channel').each(
+        M.local_mediaserver_guide.initialize_channel
+    );
+};
+
+/**
+ * Initialize channel
+ *
+ * @param {Object} element The channel element
+ */
+M.local_mediaserver_guide.initialize_channel = function(element) {
+    element.all('li:not(.icon)').each(
+        M.local_mediaserver_guide.initialize_program
+    );
+}
+
+
+/**
+ * Delegate hover event listeners to program
+ *
+ * @param {Object} element The program element
+ */
+M.local_mediaserver_guide.initialize_program = function(element) {
+    var link = element.one('a');
+
+    link.delegate('hover', M.local_mediaserver_guide.program_hover, M.local_mediaserver_guide.program_leave);
+}
+
+/**
+ * Hover event handler for program element
+ *
+ * @param {Event} event
+ */
+M.local_mediaserver_guide.program_hover = function(event) {
+    var element = this,
+        coordinates = element.getXY(),
+        time = element.getData('time'),
+        description = element.getData('description');
+
+    M.local_mediaserver_guide.popup.setStyle('left', coordinates[0] + 20);
+    M.local_mediaserver_guide.popup.setStyle('top', coordinates[1] + 20);
+    M.local_mediaserver_guide.popup.setContent(time + '<br />' + description);
+
+    M.local_mediaserver_guide.popup.show();
+}
+
+/**
+ * Un-hover event handler for program element
+ *
+ * @param {Event} event
+ */
+M.local_mediaserver_guide.program_leave = function(event) {
+    M.local_mediaserver_guide.popup.hide();
+}

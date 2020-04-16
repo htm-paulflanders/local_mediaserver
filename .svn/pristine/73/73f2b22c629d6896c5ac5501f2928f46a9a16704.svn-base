@@ -1,0 +1,181 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+namespace local_mediaserver\block;
+
+defined('MOODLE_INTERNAL') || die();
+
+class calendar extends \block_contents {
+    /** @var calendartype_gregorian calendar instance. */
+    private $calendar;
+
+    /**
+     * Class constructor; initialize block title and contents
+     *
+     * @param int $time Unix timestamp
+     */
+    public function __construct($time = null) {
+        global $PAGE, $OUTPUT;
+
+        parent::__construct();
+
+        // Don't care about non-Gregorian calendars.
+        $this->calendar = new \calendartype_gregorian\structure();
+
+        // Initialise javascript module, for displaying calendar popup.
+        $module = array(
+            'name' => 'local_mediaserver_calendar',
+            'fullpath' => '/local/mediaserver/guide/calendar.js',
+            'requires' => array(),
+        );
+        $PAGE->requires->js_init_call('M.local_mediaserver_calendar.initialize', null, false, $module);
+
+        $icon = $OUTPUT->pix_icon('i/calendar', get_string('calendar', 'calendar'));
+        $link = \html_writer::link('#', $icon, array('id' => 'calendar-popup-link'));
+
+        $this->title = userdate($time, '%B %Y') . $link;
+        $this->content = $this->get_calendar($time);
+        $this->content .= $this->get_calendar_popup($time);
+    }
+
+    /**
+     * Generate calendar content
+     *
+     * @param int $time Unit timestamp
+     * @return string
+     */
+    private function get_calendar($time) {
+        global $PAGE;
+
+        $date = $this->calendar->timestamp_to_date_array($time);
+        list($mday, $month, $year) = array($date['mday'], $date['mon'], $date['year']);
+
+        $daysinweek = $this->calendar->get_num_weekdays();
+        $minwday = $this->calendar->get_starting_weekday();
+        $maxwday = $minwday + ($daysinweek - 1);
+
+        $table = new \html_table();
+        $table->attributes['class'] = 'minicalendar calendartable';
+
+        // Day names across top.
+        $days = $this->calendar->get_weekdays();
+
+        $row = new \html_table_row();
+
+        for ($i = $minwday; $i <= $maxwday; ++$i) {
+            $index = $i % $daysinweek;
+            $row->cells[] = \html_writer::tag('abbr', $days[$index]['shortname'], array('title' => $days[$index]['fullname']));
+        }
+
+        $table->data[] = $row;
+
+        // Days of month.
+        $startwday = dayofweek(1, $month, $year);
+        if ($startwday < $minwday) {
+            $startwday += $daysinweek;
+        }
+
+        $link = $PAGE->url;
+
+        $row = new \html_table_row();
+
+        // Padding from previous month.
+        $maxdaysprevious = $this->calendar->get_num_days_in_month($year, $month - 1);
+        $day = ($maxdaysprevious - $startwday) + $minwday + 1;
+
+        for ($i = $minwday; $i < $startwday; ++$i, ++$day) {
+            $cell = new \html_table_cell();
+
+            $link->param('t', mktime(0, 0, 0, $month - 1, $day, $year));
+
+            $cell->text = \html_writer::link($link, $day);
+            $cell->attributes['class'] = 'daypadding';
+
+            $row->cells[] = $cell;
+        }
+
+        // Current month.
+        $maxdays = $this->calendar->get_num_days_in_month($year, $month);
+        $dayofweek = $startwday;
+
+        for ($day = 1; $day <= $maxdays; ++$day, ++$dayofweek) {
+            // Start a new new table row for each week.
+            if ($dayofweek > $maxwday) {
+                $table->data[] = $row;
+                $row = new \html_table_row();
+
+                $dayofweek = $minwday;
+            }
+
+            $cell = new \html_table_cell();
+
+            $link->param('t', mktime(0, 0, 0, $month, $day, $year));
+            $cell->text = \html_writer::link($link, $day);
+
+            if ($mday == $day) {
+                $cell->attributes['class'] .= 'dayselected';
+            }
+
+            $row->cells[] = $cell;
+        }
+
+        // Padding to following month.
+        $day = 1;
+
+        for ($i = $dayofweek; $i <= $maxwday; ++$i, ++$day) {
+            $cell = new \html_table_cell();
+
+            $link->param('t', mktime(0, 0, 0, $month + 1, $day, $year));
+
+            $cell->text = \html_writer::link($link, $day);
+            $cell->attributes['class'] = 'daypadding';
+
+            $row->cells[] = $cell;
+        }
+
+        $table->data[] = $row;
+
+        return \html_writer::table($table);
+    }
+
+    /**
+     * Generate calendar popup element
+     *
+     * @param int $time Unix timestamp
+     * @return string
+     */
+    private function get_calendar_popup($time) {
+        $date = $this->calendar->timestamp_to_date_array($time);
+        list($month, $year) = array($date['mon'], $date['year']);
+
+        $months = $this->calendar->get_months();
+        $years = $this->calendar->get_years();
+
+        $monthselect = \html_writer::select($months, 'monthselect', $month, false);
+        $yearselect = \html_writer::select($years, 'yearselect', $year, false);
+        $choose = \html_writer::empty_tag('input', array('type' => 'button', 'id' => 'calendar-popup-button', 'value' => get_string('go')));
+
+        return \html_writer::tag('div', $monthselect . $yearselect . $choose, array('id' => 'calendar-popup-container'));
+    }
+
+}

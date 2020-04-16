@@ -1,0 +1,240 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+defined('MOODLE_INTERNAL') || die();
+
+/**
+ * Custom URL handling class that supports the plugin appearing outside its real location
+ */
+class local_mediaserver_url extends moodle_url {
+
+    /**
+     * Create new instance of class
+     *
+     * @param moodle_url|string $url
+     * @param array $params
+     * @param string $anchor
+     */
+    public function __construct($url, array $params = null, $anchor = null) {
+        if ($shorturl = get_config('local_mediaserver', 'shorturl')) {
+            if (preg_match('/^\/local\/mediaserver\/(.*)$/', $url, $matches)) {
+                $url = $shorturl . $matches[1];
+            }
+        }
+
+        parent::__construct($url, $params, $anchor);
+    }
+}
+
+/**
+ * Puts Media Server into the global navigation tree
+ *
+ * @param global_navigation $navigation the navigation tree instance
+ * @category navigation
+ */
+function local_mediaserver_extends_navigation(global_navigation $navigation) {
+    $context = context_system::instance();
+
+    if (has_capability('local/mediaserver:view', $context)) {
+        // Get the root 'site' node.
+        $rootnode = $navigation->find('site', navigation_node::TYPE_ROOTNODE);
+
+        // Add Media server container.
+        $text = get_string('pluginname', 'local_mediaserver');
+        $icon = new pix_icon('icon', $text, 'local_mediaserver');
+
+        $container = $rootnode->add($text, new local_mediaserver_url('/local/mediaserver/index.php'), navigation_node::TYPE_CONTAINER, null, null, $icon);
+
+        // Expand container for users who can add content.
+        if ($usercanaddcontent = has_capability('local/mediaserver:add', $context)) {
+            $branch = $container->add(get_string('addcontent', 'local_mediaserver'), null, navigation_node::TYPE_CONTAINER);
+
+            $branch->add(get_string('sourceurl', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/admin/media_edit.php'));
+            $branch->add(get_string('sourceupload', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/admin/upload.php'));
+            $branch->add(get_string('queue', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/admin/queue.php'));
+        }
+
+        // Expand container for users who can view EPG.
+        if (has_capability('local/mediaserver:viewepg', $context)) {
+            $guide = new local_mediaserver_url('/local/mediaserver/guide/index.php');
+            $branch = $container->add(get_string('sourceepg', 'local_mediaserver'), $guide, navigation_node::TYPE_CONTAINER, null, 'epg');
+
+            if (has_capability('local/mediaserver:channels', $context)) {
+                $branch->add(get_string('channels', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/guide/channels.php'));
+            }
+
+            $branch->add(get_string('thisweek', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/guide/week.php'));
+            $branch->add(get_string('favourites', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/guide/favourites.php'));
+
+            if ($usercanaddcontent) {
+                $branch->add(get_string('recordseries', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/guide/links.php'));
+            }
+        }
+    }
+}
+
+/**
+ * Cron callback
+ *
+ * @return void
+ */
+function local_mediaserver_cron() {
+    global $CFG, $DB;
+
+    // Ensure we only run the task on the hour (called every 5 minutes by cron).
+    $crontime = time();
+    $crontime -= ($crontime % (MINSECS * 5));
+
+    if ($crontime % HOURSECS > 0) {
+        // Nothing to do.
+        return;   
+    }
+
+    require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+    mtrace('Download EPG channel data...');
+
+    $channels = local_mediaserver_enabled_channels();
+    foreach ($channels as $channel) {
+        // Download new channel data if we don't have any future programs for it.
+        $select = 'channel = :channel AND timebegin > :now';
+        if (! $DB->record_exists_select('local_mediaserver_program', $select, array('channel' => $channel->id, 'now' => $crontime))) {
+            $programs = local_mediaserver_channel_download($channel, $crontime);
+
+            $log = sprintf('... %s: %d programmes', $channel->name, count($programs));
+            mtrace($log);
+
+            foreach ($programs as $program) {
+                $DB->insert_record('local_mediaserver_program', $program);
+            }
+        }
+    }
+
+    // Schedule series link recordings, after previous weeks listings have ended (Monday 08:00AM).
+    $runserieslink = false;
+    if (strftime('%u', $crontime) == 1) {
+        // It's Monday.
+        $time = strtotime(LOCAL_MEDIASERVER_LISTING_BOUNDARY);
+
+        $runserieslink = ($time == $crontime);
+    }
+
+    if ($runserieslink) {
+        local_mediaserver_channel_clean(0, $crontime - (4 * WEEKSECS));
+
+        mtrace('Schedule series link recordings...');
+
+        $series = $DB->get_records('local_mediaserver_series', array('finished' => 0), 'title, series');
+        foreach ($series as $link) {
+            $count = local_mediaserver_series_record($link);
+
+            $log = get_string('recordseriesdone', 'local_mediaserver', $count);
+            mtrace('... ' . $link->title . ': ' . $log);
+        }
+    }
+}
+
+/**
+ * Serves the channel icons
+ *
+ * @param stdClass $course course object
+ * @param stdClass $cm course module object
+ * @param stdClass $context context object
+ * @param string $filearea file area
+ * @param array $args extra arguments
+ * @param bool $forcedownload whether or not force download
+ * @param array $options additional options affecting the file serving
+ * @return bool false if file not found, does not return if found - justsend the file
+ */
+function local_mediaserver_pluginfile($course, $cm, $context, $filearea, $args, $forcedownload, array $options=array()) {
+    global $CFG, $DB, $USER;
+
+    if ($context->contextlevel != CONTEXT_SYSTEM) {
+        return false;
+    }
+
+    require_login(SITEID, false);
+
+    if (! has_capability('local/mediaserver:view', $context)) {
+        return false;
+    }
+
+    $areas = local_mediaserver_get_file_areas($course, $cm, $context);
+
+    // File area must contain a real area.
+    if (! isset($areas[$filearea])) {
+        return false;
+    }
+
+    // ID will refer to stream (in the case of uploads/frames) or channel (all other file areas).
+    $id = (int)array_shift($args);
+
+    if ($filearea == 'upload') {
+        $params = array('id' => $id, 'source' => 'upload');
+
+        // Normal users can only see their own queued items.
+        if (! has_capability('moodle/site:config', $context)) {
+            $params['userid'] = $USER->id;
+        }
+
+        if (! $DB->record_exists('local_mediaserver_stream', $params)) {
+            return false;
+        }
+    } else if ($filearea == 'frame') {
+        $params = array('id' => $id, 'done' => 1);
+
+        if (! $DB->record_exists('local_mediaserver_stream', $params)) {
+            return false;
+        }
+    } else if (! $DB->record_exists('local_mediaserver_channel', array('id' => $id))) {
+        return false;
+    }
+
+    $fs = get_file_storage();
+    $relativepath = implode('/', $args);
+    $fullpath = "/$context->id/local_mediaserver/$filearea/$id/$relativepath";
+    if (! $file = $fs->get_file_by_hash(sha1($fullpath)) or $file->is_directory()) {
+        return false;
+    }
+
+    // Finally send the file.
+    send_stored_file($file, 0, 0, true, $options); // download MUST be forced - security!
+}
+
+/**
+ * Lists all browsable file areas
+ *
+ * @param stdClass $course course object
+ * @param stdClass $cm course module object
+ * @param stdClass $context context object
+ * @return array
+ */
+function local_mediaserver_get_file_areas($course, $cm, $context) {
+    $fileareas = array(
+        'channel' => get_string('channels', 'local_mediaserver'),
+        'frame'   => get_string('frames', 'local_mediaserver'),
+        'upload'  => get_string('sourceupload', 'local_mediaserver'),
+    );
+
+    return $fileareas;
+}

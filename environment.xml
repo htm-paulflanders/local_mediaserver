@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<COMPATIBILITY_MATRIX>
+  <PLUGIN name="local_mediaserver">
+    <CUSTOM_CHECKS>
+      <CUSTOM_CHECK file="local/mediaserver/lib.php" function="local_mediaserver_environment_rss" level="optional">
+        <FEEDBACK>
+          <ON_CHECK message="configenablerssfeedsdisabled2" />
+        </FEEDBACK>
+      </CUSTOM_CHECK>
+      <CUSTOM_CHECK file="local/mediaserver/lib.php" function="local_mediaserver_environment_web_service" level="optional" />
+    </CUSTOM_CHECKS>
+  </PLUGIN>
+</COMPATIBILITY_MATRIX>

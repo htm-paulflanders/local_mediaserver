@@ -1,0 +1,60 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+defined('MOODLE_INTERNAL') || die();
+
+global $CFG;
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+/**
+ * Unit test for media source reference matching
+ *
+ * @group greenhead
+ * @group local_mediaserver
+ */
+class mediasource_youtube_source_testcase extends advanced_testcase {
+
+    /**
+     * Tests reference matching against Youtube URLs
+     *
+     * @return void
+     */
+    public function test_reference() {
+        $urls = array(
+            'FHCYHldJi_g' => 'https://www.youtube.com/v/FHCYHldJi_g',
+            'pUjE9H8QlA4' => 'http://www.youtube.com/watch?v=pUjE9H8QlA4&list=RDpUjE9H8QlA4#t=0',
+            'uRGljemfwUE' => 'https://www.youtube.com/watch?feature=player_detailpage&v=uRGljemfwUE',
+            'c89MUbMdasI' => 'http://youtube.com/watch?v=c89MUbMdasI',
+            'AJrIpDpGpFA' => 'https://youtu.be/AJrIpDpGpFA',
+        );
+
+        foreach ($urls as $expected => $url) {
+            $source = local_mediaserver_source_reference($url);
+            $this->assertInstanceOf('mediasource_youtube\\definition', $source, 'Matching "' . $url . '" failed.');
+            $this->assertEquals('youtube', $source->get_source_type());
+
+            $reference = $source->get_reference($url);
+            $this->assertEquals($expected, $reference);
+        }
+    }
+}

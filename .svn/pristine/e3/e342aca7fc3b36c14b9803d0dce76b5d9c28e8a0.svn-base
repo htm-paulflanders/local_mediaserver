@@ -1,0 +1,222 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+namespace local_mediaserver\output;
+
+defined('MOODLE_INTERNAL') || die();
+
+require_once($CFG->libdir . '/tablelib.php');
+require_once($CFG->libdir . '/searchlib.php');
+require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+class links_table extends \table_sql {
+
+    /**
+     * Constructor
+     *
+     * @param string $search
+     */
+    public function __construct($search) {
+        global $PAGE;
+
+        parent::__construct('local-mediaserver-links-table');
+
+        // Initialise javascript module, for AJAX toggling of series finished flag.
+        $PAGE->requires->js_call_amd('local_mediaserver/series', 'init');
+
+        // Define columns.
+        $headers = get_strings(array('programtitle', 'series', 'episodes', 'episodelast'), 'local_mediaserver');
+
+        $columns = array(
+            'toggle' => null,
+            'title' => $headers->programtitle,
+            'search' => null,
+            'fullname' => get_string('name'),
+            'series' => $headers->series,
+            'episodes' => $headers->episodes,
+            'latest' => $headers->episodelast,
+        );
+        $this->define_columns(array_keys($columns));
+        $this->define_headers(array_values($columns));
+
+        // Table configuration.
+        $this->set_attribute('class', $this->attributes['class'] . ' table-programs local-mediaserver-links-table');
+
+        $this->sortable(true, 'latest', SORT_DESC);
+        $this->no_sorting('toggle');
+        $this->no_sorting('search');
+
+        $this->useridfield = 'userid';
+
+        $this->initialbars(false);
+        $this->collapsible(false);
+
+        // Initialize table SQL properties.
+        $this->init_sql($search);
+    }
+
+    /**
+     * Initializes table SQL properties
+     *
+     * @param string $search
+     * @return void
+     */
+    protected function init_sql($search) {
+        global $DB, $USER;
+
+        $fields = 's.*, COALESCE(pr.episodes, 0) AS episodes, pr.first, pr.latest, ' . get_all_user_name_fields(true, 'u');
+
+        // We will LEFT JOIN against all recorded series programs.
+        $sqlinner = 'SELECT p.title, p.series, COUNT(p.id) AS episodes, MIN(p.timebegin) AS first, MAX(p.timebegin) AS latest
+                       FROM {local_mediaserver_program} p
+                       JOIN {local_mediaserver_recording} r ON r.program = p.id
+                      WHERE p.series > 0 AND p.episode > 0
+                   GROUP BY p.title, p.series';
+
+        $from = '{local_mediaserver_series} s
+            JOIN {user} u ON u.id = s.userid
+       LEFT JOIN (' . $sqlinner . ') pr ON pr.title = s.title AND pr.series = s.series';
+
+        $where = '1=1';
+        $params = array();
+
+        $tokenreplacements = array('title:' => 'subject:', 'enabled:' => 'instance:');
+        $search = trim(strtr($search, $tokenreplacements));
+
+        if ($search) {
+            $parser = new \search_parser();
+            $lexer = new \search_lexer($parser);
+
+            if ($lexer->parse($search)) {
+                $parsetree = $parser->get_parsed_array();
+
+                // Series is enabled if it hasn't been flagged as finished (match UI terminology).
+                $enabled = $DB->sql_bitxor('s.finished', 1);
+                list($where, $params) = local_mediaserver_search_generate_sql(
+                    $parsetree, 's.title', 's.title', 's.userid', 'u.id', 'u.firstname', 'u.lastname', 'COALESCE(pr.latest, 0)', $enabled
+                );
+            }
+        }
+
+        // Users without the 'reports' capability can only see their own series links.
+        if (! has_capability('local/mediaserver:reports', \context_system::instance())) {
+            $where .= ' AND s.userid = :userid';
+            $params['userid'] = $USER->id;
+        }
+
+
+        $this->set_sql($fields, $from, $where, $params);
+        $this->set_count_sql("SELECT COUNT(1) FROM $from WHERE $where", $params);
+    }
+
+    /**
+     * Get any extra classes names to add to this row in the HTML
+     *
+     * @param stdClass $series
+     * @return string
+     */
+    public function get_row_class($series) {
+        if ($series->finished) {
+            return 'dimmed_text';
+        }
+    }
+
+    /**
+     * Format series title table column
+     *
+     * @param stdClass $series
+     * @return string
+     */
+    public function col_title(\stdClass $series) {
+        return \html_writer::tag('span', s($series->title), array('title' => $series->title));;
+    }
+
+    /**
+     * Format series toggle table column
+     *
+     * @param stdClass $series
+     * @return string
+     */
+    public function col_toggle(\stdClass $series) {
+        global $OUTPUT;
+
+        if ($series->finished) {
+            $icon = 't/show';
+            $text = get_string('enable');
+        } else {
+            $icon = 't/hide';
+            $text = get_string('disable');
+        }
+
+        $attributes = array('class' => 'iconsmall iconstate', 'data-id' => $series->id, 'data-finished' => $series->finished);
+
+        return $OUTPUT->action_icon('#', new \pix_icon($icon, $text, 'moodle', $attributes));
+    }
+
+    /**
+     * Format series search table column
+     *
+     * @param stdClass $series
+     * @return string
+     */
+    public function col_search(\stdClass $series) {
+        global $OUTPUT;
+
+        if ($series->episodes == 0) {
+            return null;
+        }
+
+        if (str_word_count($series->title) == 1) {
+            $searchstr = 'title:' . $series->title;
+        } else {
+            $searchstr = '"' . $series->title . '"';
+        }
+
+        $searchurl = local_mediaserver_guide_search_url(array(
+            'search' => $searchstr . ' series:' . $series->series,
+            'recorded' => 1,
+            'timebegindisable' => 0,
+            'timebegin' => local_mediaserver_time_round($series->first, true),
+            'timeenddisable' => 0,
+            'timeend' => local_mediaserver_time_round($series->latest, true),
+        ));
+
+        return $OUTPUT->single_button($searchurl, '', 'post', array('class' => 'search-button'));
+    }
+
+    /**
+     * Format series latest table column
+     *
+     * @param stdClass $series
+     * @return string
+     */
+    public function col_latest(\stdClass $series) {
+        if ($series->episodes == 0) {
+            return get_string('never');
+        }
+
+        $format = get_string('strftimedatetime', 'langconfig');
+
+        return local_mediaserver_local_time($series->latest, $format);
+    }
+}

@@ -1,0 +1,116 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+namespace local_mediaserver\block;
+
+defined('MOODLE_INTERNAL') || die();
+
+class today extends \block_contents {
+
+    /**
+     * Class constructor; initialize block title and contents
+     *
+     * @param int $time Unix timestamp
+     */
+    public function __construct($time) {
+        parent::__construct();
+
+        $this->title   = get_string('today');
+        $this->content = $this->get_programs($time);
+    }
+
+    /**
+     * Generate today's program content
+     *
+     * @param int $time Unix timestamp
+     * @return string
+     */
+    private function get_programs($time) {
+        global $DB;
+
+        $strtimeformat = get_string('strftimetime', 'langconfig');
+        $now = time();
+
+        $output = \html_writer::start_tag('ul');
+
+        if ($programs = $this->get_programs_data($time)) {
+            foreach ($programs as $program) {
+                $class = ($program->stream ? 'program-recorded' : 'program-favourite');
+
+                if ($program->timebegin < ($now + LOCAL_MEDIASERVER_RECORD_BUFFER)) {
+                    $class .= ' program-old';
+                }
+
+                $link = new \local_mediaserver_url('/local/mediaserver/guide/channel.php',
+                    array('id' => $program->channel, 't' => $program->timebegin), 'p' . $program->id);
+
+                $channel = $DB->get_field('local_mediaserver_channel', 'name', array('id' => $program->channel));
+
+                $strdate  = local_mediaserver_program_time($program->timebegin, $strtimeformat);
+                $strdate .= ' (' . format_time($program->timeend - $program->timebegin) . ')';
+
+                $content  = \html_writer::link($link, $program->title);
+                $content .= "$channel, $strdate";
+
+                $output .= \html_writer::tag('li', $content, array('class' => $class));
+            }
+        } else {
+            $output .= \html_writer::tag('li', get_string('nothingtodisplay'));
+        }
+
+        $output .= \html_writer::end_tag('ul');
+
+        return $output;
+    }
+
+    /**
+     * Return all recorded/favourite programs for a given day
+     *
+     * @param int $time Unix timestamp
+     * @return array
+     */
+    private function get_programs_data($time) {
+        global $DB, $USER;
+
+        // Normalize time, round down to beginning of day.
+        $time = local_mediaserver_time_round($time, true);
+
+        // End time is end of the day, minus one second.
+        $timeend = ($time + (DAYSECS - 1));
+
+        $fields = local_mediaserver_program_fields();
+
+        $sql = "SELECT $fields
+                  FROM {local_mediaserver_program} p
+             LEFT JOIN {local_mediaserver_recording} r ON r.program = p.id
+             LEFT JOIN {local_mediaserver_favourite} f ON f.title = p.title AND f.userid = :userid
+             LEFT JOIN {local_mediaserver_series} s ON s.title = p.title AND s.series = p.series
+                 WHERE p.timebegin BETWEEN :timebegin AND :timeend
+                HAVING stream > 0 OR favourite > 0
+              ORDER BY p.timebegin";
+
+        $conditions = array('userid' => $USER->id, 'timebegin' => $time, 'timeend' => $timeend);
+
+        return $DB->get_records_sql($sql, $conditions);
+    }
+}

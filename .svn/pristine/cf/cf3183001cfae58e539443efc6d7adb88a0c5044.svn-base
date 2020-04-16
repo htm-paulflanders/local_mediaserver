@@ -1,0 +1,87 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+defined('MOODLE_INTERNAL') || die();
+
+/**
+ * Unit test for base media schedule class
+ *
+ * @group greenhead
+ * @group local_mediaserver
+ */
+class local_mediaserver_media_schedule_testcase extends advanced_testcase {
+
+    /**
+     * Call protected methods from abstract class using mocking/reflection
+     *
+     * @param string $name Name of method
+     * @return mixed
+     */
+    private function call($name) {
+        $class = '\\local_mediaserver\\media_schedule';
+        $stub = $this->getMockForAbstractClass($class);
+
+        $method = new \ReflectionMethod($class, $name);
+        $method->setAccessible(true);
+
+        $args = array_slice(func_get_args(), 1);
+
+        return $method->invokeArgs($stub, $args);
+    }
+
+    /**
+     * Test trimming program title
+     *
+     * @return void
+     */
+    public function test_trim_title() {
+        $method = 'trim_title';
+
+        $this->assertEquals('Panorama', $this->call($method, '(GMT) Panorama'));
+        $this->assertEquals('Panorama', $this->call($method, '(BST) Panorama'));
+
+        $expected = 'GMT is the best';
+        $this->assertEquals($expected, $this->call($method, $expected));
+    }
+
+    /**
+     * Test trimming episode title
+     *
+     * @return void
+     */
+    public function test_trim_episode_title() {
+        $method = 'trim_episode_title';
+
+        // Should return empty string when program and episode title are the same, or episode is empty.
+        $title = 'Panorama';
+        $this->assertEmpty($this->call($method, $title, $title));
+        $this->assertEmpty($this->call($method, $title, ''));
+
+        // Make sure program title is removed from beginning/end.
+        $this->assertEquals('Unit Testing', $this->call($method, 'Dispatches', 'Unit Testing: Dispatches'));
+        $this->assertEquals('Unit Testing', $this->call($method, 'Panorama', 'Panorama - Unit Testing'));
+
+        $this->assertEquals('Does some Testing', $this->call($method, 'Postman Pat', 'Postman Pat does some Testing'));
+        $this->assertEquals('The Truth', $this->call($method, '9/11', 'The Truth'));
+    }
+}

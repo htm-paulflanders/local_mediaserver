@@ -1,0 +1,318 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+namespace mediaschedule_direct;
+
+use \local_mediaserver\exception\media_schedule_exception;
+
+defined('MOODLE_INTERNAL') || die();
+
+class definition extends \local_mediaserver\media_schedule {
+    /** @const string SCHEDULE_API Endpoint for schedule data. */
+    const SCHEDULE_API = 'https://json.schedulesdirect.org';
+
+    /** @const string VERSION_API Current API version. */
+    const VERSION_API = '20141201';
+
+    /** @const string Format string for dates. */
+    const SCHEDULE_DATE_FORMAT = 'Y-m-d';
+
+    /** @const string Root JSON elements for accessing schedule data. */
+    const JSON_PROGRAMS = 'programs';
+    const JSON_PROGRAM_ID = 'programID';
+    const JSON_TRANSMISSION = 'airDateTime';
+    const JSON_DURATION = 'duration';
+
+    /** @const string JSON elements for each program. */
+    const JSON_TITLE_CONTAINER = 'titles';
+    const JSON_TITLE = 'title120';
+    const JSON_METADATA = 'metadata';
+    const JSON_SERIES_CONTAINER = 'Gracenote';
+    const JSON_SERIES = 'season';
+    const JSON_EPISODE = 'episode';
+    const JSON_EPISODE_TITLE = 'episodeTitle150';
+    const JSON_DESCRIPTION_CONTAINER = 'descriptions';
+    const JSON_DESCRIPTION_LONG = 'description1000';
+    const JSON_DESCRIPTION_SHORT = 'description100';
+    const JSON_DESCRIPTION = 'description';
+    const JSON_GENRES = 'genres';
+
+    /** @var array Subset of program fields we're interested in. */
+    private static $fields = array(
+        self::JSON_PROGRAM_ID, self::JSON_TITLE_CONTAINER, self::JSON_METADATA, self::JSON_EPISODE_TITLE, self::JSON_DESCRIPTION_CONTAINER, self::JSON_GENRES
+    );
+
+    /**
+     * Send request to schedule endpoint
+     *
+     * @param string $method
+     * @param array $postdata
+     * @param array $headers
+     * @param string $version
+     * @return mixed
+     *
+     * @throws invalid_response_exception
+     */
+    private function send_request($method, array $postdata, array $headers = null, $version = self::VERSION_API) {
+        $url = sprintf('%s/%s/%s', self::SCHEDULE_API, $version, $method);
+
+        // Token header is required for all calls (except requesting the token).
+        if ($method !== 'token') {
+            $headers['token'] = $this->token();
+        }
+
+        // Request body should always contain JSON encoded POST data.
+        try {
+            $response = $this->request($url, json_encode($postdata), $headers);
+        } catch (media_schedule_exception $ex) {
+            $json = json_decode($ex->response->results, true);
+
+            throw new invalid_response_exception(trim($ex->debuginfo), $json);
+        } 
+
+        return json_decode($response, true);
+    }
+
+    /**
+     * Request an authentication token to be used in subsequent requests
+     *
+     * @return array
+     *
+     * @throws invalid_response_exception
+     */
+    protected function request_token() {
+        $config = get_config('mediaschedule_direct');
+        $auth = array('username' => $config->username, 'password' => sha1($config->password, false));
+
+        // Any non-zero code should be considered a failure.
+        $json = $this->send_request('token', $auth);
+        if ($json['code'] !== 0) {
+            $tokenfailed = get_string('tokengenerationfailed', 'error');
+
+            throw new invalid_response_exception($tokenfailed, $json);
+        }
+
+        return $json;
+    }
+
+    /**
+     * Get authentication token, cache value to prevent re-requesting
+     *
+     * @return string
+     */
+    private function token() {
+        $cache = \cache::make('mediaschedule_direct', 'token');
+
+        // Check whether we already have a cached token.
+        if (! $token = $cache->get('value')) {
+            $token = $this->request_token()['token'];
+
+            $cache->set('value', $token);
+        }
+
+        return $token;
+    }
+
+    /**
+     * Get a list of dates between two times
+     *
+     * @param int $start
+     * @param int $finish
+     * @return array
+     */
+    private function schedule_dates($start, $finish) {
+        $result = array();
+
+        for ($date = $start; $date <= $finish; $date+=DAYSECS) {
+            $result[] = gmdate(self::SCHEDULE_DATE_FORMAT, $date);
+        }
+
+        // Make sure $finish date is always included.
+        $enddate = gmdate(self::SCHEDULE_DATE_FORMAT, $finish);
+        if (end($result) !== $enddate) {
+            $result[] = $enddate;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Request schedule data for a given station/broadcast range
+     *
+     * @param int $station Station ID
+     * @param int $start
+     * @param int $finish
+     * @return array
+     */
+    protected function request_schedule($station, $start, $finish) {
+        // The 'date' element is not a range, it must include all dates between $start & $finish.
+        $stationdata = array(
+            'stationID' => clean_param($station, PARAM_INT),
+            'date' => $this->schedule_dates($start, $finish),
+        );
+
+        return $this->send_request('schedules', array($stationdata));
+    }
+
+    /**
+     * Extract program information (id/broadcast) from station/broadcast schedule
+     *
+     * @param int $station Station ID
+     * @param int $start
+     * @param int $finish
+     * @return array of program ID => [timebegin, timeend]
+     *
+     * @throws invalid_response_exception
+     */
+    private function schedule($station, $start, $finish) {
+        $schedule = array();
+
+        $json = $this->request_schedule($station, $start, $finish);
+        foreach ($json as $date) {
+            // Check for error conditions in date information.
+            if (array_key_exists('code', $date) && $date['code'] !== 0) {
+                $scheduleerror = get_string('requestscheduleerror', 'mediaschedule_direct');
+
+                throw new invalid_response_exception($scheduleerror, $date);
+            }
+
+            foreach ($date[self::JSON_PROGRAMS] as $item) {
+                $timebegin = strtotime($item[self::JSON_TRANSMISSION]);
+                $timeend = $timebegin + $item[self::JSON_DURATION];
+
+                // Ensure broadcast is between start and finish.
+                if ($timebegin < $start || $timeend > $finish) {
+                    continue;
+                }
+
+                $schedule[$item[self::JSON_PROGRAM_ID]][] = array($timebegin, $timeend);
+            }
+        }
+
+        return $schedule;
+    }
+
+    /**
+     * Request extended data for a list of program ID's
+     *
+     * @param array $programs
+     * @return array
+     */
+    protected function request_programs(array $programs) {
+        $headers = array('Accept-Encoding' => 'deflate,gzip');
+
+        return $this->send_request('programs', $programs, $headers);
+    }
+
+    /**
+     * Download schedule data from the Schedules Direct SD-JSON service
+     *
+     * @param string $configuration Station ID
+     * @param int $start
+     * @param int $finish
+     * @return void
+     */
+    public function download($configuration, $start, $finish) {
+        // We need to extract all program ID's being broadcast, and pass them onto the 'programs' method.
+        $schedule = $this->schedule($configuration, $start, $finish);
+        $pids = array_keys($schedule);
+
+        $programs = array();
+
+        // Get all programs and re-key the JSON data on the programID.
+        $json = $this->request_programs($pids);
+        foreach ($json as $item) {
+            // Check for error conditions in program information.
+            if (array_key_exists('code', $item) && $item['code'] !== 0) {
+                debugging(sprintf('Code: %d, %s (%s)',
+                    $item['code'], $item['message'], $item[self::JSON_PROGRAM_ID]), DEBUG_DEVELOPER);
+
+                continue;
+            }
+
+            $item = array_intersect_key($item, array_flip(self::$fields));
+
+            $program = new \stdClass;
+            $program->title = $item[self::JSON_TITLE_CONTAINER][0][self::JSON_TITLE];
+
+            // Series data (optional, may also be contained within episode title).
+            $program->series = 0;
+            $program->episode = 0;
+            if (array_key_exists(self::JSON_METADATA, $item)) {
+                $seriescontainer = $item[self::JSON_METADATA][0][self::JSON_SERIES_CONTAINER];
+
+                $program->series = $seriescontainer[self::JSON_SERIES];
+                $program->episode = $seriescontainer[self::JSON_EPISODE];
+            }
+
+            // Episode title (optional, may also contain series information).
+            $program->episodetitle = '';
+            if (array_key_exists(self::JSON_EPISODE_TITLE, $item)) {
+                $program->episodetitle = $item[self::JSON_EPISODE_TITLE];
+
+                if (preg_match('/^Episode (?<episode>\d+)$/i', $program->episodetitle, $matches)) {
+                    if ($program->series == 0) {
+                        $program->series = 1;
+                    }
+                    if ($program->episode == 0) {
+                        $program->episode = $matches['episode'];
+                    }
+
+                    $program->episodetitle = '';
+                }
+            }
+
+            // Post-filter series information, ensure series/episode are both non-zero.
+            if (min($program->series, $program->episode) == 0) {
+                $program->series = $program->episode = 0;
+            }
+
+            // Description container is optional.
+            $program->description = '';
+            if (array_key_exists(self::JSON_DESCRIPTION_CONTAINER, $item)) {
+                $descriptioncontainer = $item[self::JSON_DESCRIPTION_CONTAINER];
+
+                if (array_key_exists(self::JSON_DESCRIPTION_LONG, $descriptioncontainer)) {
+                    $program->description = $descriptioncontainer[self::JSON_DESCRIPTION_LONG][0][self::JSON_DESCRIPTION];
+                } else {
+                    $program->description = $descriptioncontainer[self::JSON_DESCRIPTION_SHORT][0][self::JSON_DESCRIPTION];
+                }
+            }
+
+            $program->genre = array_shift($item[self::JSON_GENRES]);
+
+            $programs[$item[self::JSON_PROGRAM_ID]] = $program;
+        }
+
+        // Now match elements in schedule data to programs, specifically broadcast data (timebegin/end).
+        foreach ($schedule as $programid => $broadcasts) {
+            foreach ($broadcasts as $broadcast) {
+                $program = clone($programs[$programid]);
+
+                list($program->timebegin, $program->timeend) = $broadcast;
+
+                array_push($this->programs, $program);
+            }
+        }
+    }
+}

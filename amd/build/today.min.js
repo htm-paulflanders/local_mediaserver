@@ -1,0 +1,1 @@
+define(["local_mediaserver/guide"],function(a){var b={PROGRAMS:".block_fake li a"};return{init:function(){a.init(b.PROGRAMS)}}});

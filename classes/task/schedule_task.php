@@ -1,0 +1,85 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id: schedule_task.php 4268 2016-05-09 09:36:46Z pholden $
+ */
+
+namespace local_mediaserver\task;
+
+defined('MOODLE_INTERNAL') || die();
+
+class schedule_task extends \core\task\scheduled_task {
+
+    /**
+     * Get a descriptive name for this task (shown to admins)
+     *
+     * @return string
+     */
+    public function get_name() {
+        return get_string('scheduletask', 'local_mediaserver');
+    }
+
+    /**
+     * Execute task; update schedule data, record series linked programs
+     *
+     * @return void
+     */
+    public function execute() {
+        global $CFG, $DB;
+
+        require_once($CFG->dirroot . '/local/mediaserver/locallib.php');
+
+        // Get start/finish times for schedule listings.
+        $start = local_mediaserver_time_round(time());
+        $finish = $this->get_next_scheduled_time();
+
+        // Download schedule data for all enabled channels without future programs.
+        foreach (local_mediaserver_enabled_channels() as $channel) {
+            $select = 'channel = :channel AND timebegin > :time';
+            $params = array('channel' => $channel->id, 'time' => $start);
+
+            if (! $DB->record_exists_select('local_mediaserver_program', $select, $params)) {
+                $programs = local_mediaserver_schedule_download($channel, $start, $finish);
+
+                $log = sprintf('... downloaded %d programmes for channel \'%s\'', count($programs), $channel->name);
+                mtrace($log);
+
+                foreach ($programs as $program) {
+                    $DB->insert_record('local_mediaserver_program', $program);
+                }
+            }
+        }
+
+        // Delete old schedule data.
+        $deleteold = get_config('local_mediaserver', 'deleteoldlistings');
+        local_mediaserver_channel_clean(0, $start - $deleteold);
+
+        // Record series linked programs.
+        $serieslinks = $DB->get_records('local_mediaserver_series', array('finished' => 0), 'title, series');
+        foreach ($serieslinks as $series) {
+            $count = local_mediaserver_series_record($series);
+
+            if ($count > 0) {
+                $log = sprintf('... scheduled %d recordings for \'%s\', series %d', $count, $series->title, $series->series);
+                mtrace($log);
+            }
+        }
+    }
+}

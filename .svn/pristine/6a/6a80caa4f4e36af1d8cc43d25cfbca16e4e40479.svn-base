@@ -1,0 +1,115 @@
+YUI.add('moodle-local_mediaserver-player', function (Y, NAME) {
+
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+M.local_mediaserver = M.local_mediaserver || {};
+
+var PLAYER_NAME = 'Player',
+    PLAYER;
+
+PLAYER = function() {
+    PLAYER.superclass.constructor.apply(this, arguments);
+};
+
+Y.extend(PLAYER, Y.Base, {
+    /** Element selectors. */
+    SELECTORS: {
+        CONTAINER: 'stream-container'
+    },
+
+    /** Flash plugins. */
+    PLUGINS: {
+        CORE: M.cfg.wwwroot + '/lib/flowplayer/flowplayer-3.2.18.swf',
+        RTMP: M.cfg.wwwroot + '/local/mediaserver/yui/build/moodle-local_mediaserver-player/assets/flowplayer.rtmp-3.2.13.swf'
+    },
+
+    /** Initialize media server player UI. */
+    initializer: function() {
+        var time = this.get('time'),
+            autoplay = (time > 0);
+
+        flowplayer(this.SELECTORS.CONTAINER, this.PLUGINS.CORE, {
+            plugins: {
+                rtmp: {
+                    url: this.PLUGINS.RTMP,
+                    netConnectionUrl: 'rtmp://' + this.get('server') + '/' + this.get('application'),
+                    durationFunc: 'getStreamLength'
+                },
+                controls: {
+                    fullscreen: true,
+                    height: 30,
+                    autoHide: true
+                }
+            },
+
+            playlist: M.cfg.wwwroot + this.get('playlist'),
+
+            clip: {
+                provider: 'rtmp',
+                scaling: 'fit',
+                autoPlay: autoplay,
+
+                onStart: function(clip) {
+                    // Check if seeking and the current clip is the RTMP stream.
+                    if (autoplay && clip.provider === 'rtmp') {
+                        this.seek(time);
+                    }
+                }
+            }
+        });
+    }
+}, {
+    NAME: PLAYER_NAME,
+    ATTRS: {
+        /** RTMP server address. */
+        server: {
+            value: null,
+            validator: Y.Lang.isString
+        },
+
+        /** RTMP server application. */
+        application: {
+            value: null,
+            validator: Y.Lang.isString
+        },
+
+        /** Playlist local URL. */
+        playlist: {
+            value: null,
+            validator: Y.Lang.isString
+        },
+
+        /** Player seek time. */
+        time: {
+            value: 0,
+            validator: Y.Lang.isNumber
+        }
+    }
+});
+
+M.local_mediaserver.player = function(config) {
+    return new PLAYER(config);
+};
+
+
+}, '@VERSION@', {"requires": ["base", "node"]});

@@ -1,0 +1,109 @@
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/url'], function($, ajax, notification, str, url) {
+
+    /** Element selectors. */
+    var SELECTORS = {
+        ACTION: '.table-programs .action-icon',
+        ICON:   '.iconstate'
+    };
+
+    /** Element classes. */
+    var CSS = {
+        DIMMED: 'dimmed_text'
+    };
+
+    /**
+     * Click event handler for toggle icons
+     *
+     * @method clickHandle
+     * @private
+     * @param {Event} event
+     */
+    var clickHandle = function(event) {
+        var promises = [],
+            icon = $(event.target),
+            state = Number(!icon.data('state'));
+
+        event.preventDefault();
+
+        // Create AJAX request to web service.
+        promises = ajax.call([{
+            methodname: 'local_mediaserver_update_series', args: {'id': icon.data('id'), 'finished': state}
+        }], true);
+
+        $.when.apply($, promises).done(function() {
+            toggleState(icon, state);
+        }).fail(notification.exception);
+    };
+
+    /**
+     * Toggle series icon state
+     *
+     * @method toggleState
+     * @private
+     * @param {JQuery} icon
+     * @param {Int} state
+     */
+    var toggleState = function(icon, state) {
+        var requiredStrings = [
+            { key: 'enable', component: 'moodle' },
+            { key: 'disable', component: 'moodle' }
+        ];
+
+        // Get required lang strings, and toggle icon/row.
+        str.get_strings(requiredStrings).done(function(strings) {
+            var row = icon.closest('tr');
+
+            if (state === 0) {
+                icon.attr({
+                    'src': url.imageUrl('t/hide', 'core'),
+                    'title': strings[1]
+                });
+            } else {
+                icon.attr({
+                    'src': url.imageUrl('t/show', 'core'),
+                    'title': strings[0]
+                });
+            }
+
+            row.toggleClass(CSS.DIMMED);
+            icon.data('state', state);
+        }).fail(notification.exception);
+    };
+
+    return /** @alias module:local_mediaserver/series */ {
+        // Public variables and functions.
+        /**
+         * Initialize series links UI
+         *
+         * @method init
+         */
+        init: function() {
+            $('body').delegate(SELECTORS.ACTION + ' ' + SELECTORS.ICON, 'click', clickHandle);
+
+            // Remove the icon links.
+            $(SELECTORS.ACTION).removeAttr('href');
+        }
+    };
+});

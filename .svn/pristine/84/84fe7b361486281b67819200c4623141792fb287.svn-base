@@ -1,0 +1,116 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+defined('MOODLE_INTERNAL') || die();
+
+/**
+ * Unit test for Radio Times schedule
+ *
+ * @group greenhead
+ * @group local_mediaserver
+ */
+class mediaschedule_radiotimes_schedule_testcase extends advanced_testcase {
+
+    /**
+     * Call private class methods using util helper method
+     *
+     * @param string $method
+     * @return mixed
+     */
+    private function call($method) {
+        $class = '\\mediaschedule_radiotimes\\definition';
+        $params = array_slice(func_get_args(), 1);
+
+        return phpunit_util::call_internal_method(new $class, $method, $params, $class);
+    }
+
+    /**
+     * Tests getting timezone data
+     *
+     * @return void
+     */ 
+    public function test_timezone_data() {
+        // See: http://www.timeanddate.com/time/change/uk/london?year=2015 .
+        $years = array(
+            2015 => array('dst' => 1427590800, 'std' => 1445734800),
+            2016 => array('dst' => 1459040400, 'std' => 1477789200),
+            2017 => array('dst' => 1490490000, 'std' => 1509238800),
+            2018 => array('dst' => 1521939600, 'std' => 1540688400),
+        );
+
+        foreach ($years as $year => $tzexpected) {
+            $tzdata = $this->call('timezone_data', $year);
+
+            $this->assertEquals($tzexpected, $tzdata);
+        }
+    }
+
+    /**
+     * Tests extracting program timing data
+     *
+     * @return void
+     */
+    public function test_extract_timing() {
+        $method = 'extract_program_timing';
+
+        $expected = array(1421937000, 1421940600);
+        $this->assertEquals($expected, $this->call($method, '22/01/2015', '14:30', 60, false));
+
+        $expected = array(1434979800, 1434983400);
+        $this->assertEquals($expected, $this->call($method, '22/06/2015', '14:30', 60, false));
+
+        // Test switching from GMT to DST (March 29th 2015 01:00).
+        $expected = array(1427590800, 1427594400);
+        $this->assertEquals($expected, $this->call($method, '29/03/2015', '01:00', 60, false));
+        $this->assertEquals($expected, $this->call($method, '29/03/2015', '02:00', 60, false));
+
+        // Test switching from DST to GMT (October 25th 2015 02:00).
+        $expected = array(1445734800, 1445738400);
+        $this->assertEquals($expected, $this->call($method, '25/10/2015', '01:00', 60, false));
+
+        $expected = array(1445733000, 1445736600);
+        $this->assertEquals($expected, $this->call($method, '25/10/2015', '01:30', 60, true));
+
+        $expected = array(1445736600, 1445740200);
+        $this->assertEquals($expected, $this->call($method, '25/10/2015', '01:30', 60, false));
+    }
+
+    /**
+     * Tests extracting program series data
+     *
+     * @return void
+     */
+    public function test_extract_series() {
+        $method = 'extract_program_series';
+
+        $expected = array(2, 1);
+        $this->assertEquals($expected, $this->call($method, '1, series 2'));
+        $this->assertEquals($expected, $this->call($method, '1/4, series 2'));
+
+        // Invalid/incomplete series data.
+        $expected = array(0, 0);
+        $this->assertEquals($expected, $this->call($method, '1'));
+        $this->assertEquals($expected, $this->call($method, '1/4'));
+        $this->assertEquals($expected, $this->call($method, 'series 2'));
+    }
+}

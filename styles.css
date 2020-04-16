@@ -1,0 +1,453 @@
+/* $Id: styles.css 4754 2018-06-06 16:25:51Z pholden $ */
+
+/* Browse media streams */
+
+.path-local-mediaserver .stream-preview {
+    background-color: #fff;
+    border: 1px solid #999;
+    margin: 2px;
+    width: 122px;
+    padding: 3px;
+    float: left;
+}
+
+.path-local-mediaserver .stream-preview .stream-title {
+    text-align: center;
+    height: 40px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.path-local-mediaserver .stream-preview .stream-title input[type="checkbox"] {
+    margin-right: 0;
+}
+
+.path-local-mediaserver .stream-preview .stream-title label {
+    white-space: normal;
+}
+
+.path-local-mediaserver .stream-frame {
+    border: 1px solid #999;
+    border-radius: 4px;
+}
+
+.path-local-mediaserver .paging {
+    clear: left;
+    text-align: center;
+}
+
+/* Media search breadcrumb button */
+
+.path-local-mediaserver .breadcrumb-button .searchform .iconhelp {
+    padding: 3px;
+}
+
+.path-local-mediaserver .breadcrumb-button .searchform form {
+    display: inline-block;
+}
+
+.path-local-mediaserver .breadcrumb-button .searchform input[type="text"] {
+    width: 160px;
+}
+
+/* Media browsing */
+
+#page-local-mediaserver-index .continuebutton,
+#page-local-mediaserver-search .continuebutton {
+    clear: left;
+    padding-top: 10px;
+}
+
+/* View media stream page */
+
+[data-role="local-mediaserver-player"] {
+    height: 300px;
+    width: 400px;
+    margin-bottom: 15px;
+}
+
+/* Adding new content forms */
+
+.path-local-mediaserver #id_mediainfo #fitem_id_title #id_title,
+#page-local-mediaserver-guide-series #fitem_id_format #id_format {
+    width: 330px;
+}
+
+/* Admin program tables */
+
+.path-local-mediaserver .table-programs .cell {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.path-local-mediaserver .table-programs .cell.c1 {
+    max-width: 300px;
+}
+
+/* Renderer page regions */
+
+.path-local-mediaserver-guide #guide-region-main {
+    margin: 0 0 6px 0;
+}
+
+.path-local-mediaserver-guide #guide-region-main h3 {
+    text-align: center;
+}
+
+/* Media guide blocks */
+
+.path-local-mediaserver-guide #block_fake_calendar .icon {
+    padding-top: 0;
+}
+
+.path-local-mediaserver-guide #block_fake_calendar .calendartable {
+    width: 100%
+}
+
+.path-local-mediaserver-guide #block_fake_calendar .calendartable th {
+    width: 14%;
+    font-weight: normal;
+}
+
+.path-local-mediaserver-guide #block_fake_calendar .calendartable th abbr {
+    text-decoration: none;
+}
+
+.path-local-mediaserver-guide #block_fake_calendar .calendartable th,
+.path-local-mediaserver-guide #block_fake_calendar .calendartable td {
+    padding: 2px;
+    text-align: center;
+}
+
+.path-local-mediaserver-guide #block_fake_calendar .calendartable .daypadding a {
+    color: #BBB;
+}
+
+.path-local-mediaserver-guide #block_fake_calendar .calendartable .dayselected {
+    font-weight: bold;
+    border: 1px dotted #999;
+}
+
+.path-local-mediaserver-guide #block_fake_today ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 138px;
+    overflow-y: auto;
+}
+
+.path-local-mediaserver-guide #block_fake_today li {
+    border-bottom: 1px solid #E7E7DD;
+    padding: 2px 6px;
+}
+
+.path-local-mediaserver-guide #block_fake_today li:last-of-type {
+    border-bottom: 0;
+}
+
+.path-local-mediaserver-guide #block_fake_today li a {
+    display: block;
+    color: inherit;
+    border-bottom: 1px dotted #999;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Calendar popup */
+
+.path-local-mediaserver-guide [data-role="calendar-popup"] {
+    background-color: #F3F4E6;
+    border: 1px solid #999;
+    border-radius: 4px;
+    box-shadow: 1px 1px 4px #444;
+    padding: 10px 6px 0 6px;
+    position: absolute;
+    z-index: 1000;
+}
+
+/* Program information */
+
+.path-local-mediaserver-guide .small-text {
+    font-size: 0.9em !important;
+}
+
+@media all and (min-width: 980px) {
+    .path-local-mediaserver-guide a[id^="p"]:empty {
+        padding-top: 40px;
+    }
+}
+
+.path-local-mediaserver-guide .program {
+    background-color: #F3F4E6;
+    border: 1px solid #999;
+    max-width: 440px;
+    margin: 0 auto;
+    padding: 4px;
+}
+
+.path-local-mediaserver-guide .program a {
+    color: inherit;
+    border-bottom: 1px dotted #555;
+}
+
+.path-local-mediaserver-guide .program a:link {
+    text-decoration: none;
+}
+
+.path-local-mediaserver-guide .program .stream-frame {
+    float: left;
+    margin: 4px 10px 0 0;
+    height: 60px;
+    width: 80px;
+}
+
+.path-local-mediaserver-guide .program .title {
+    background-color: #E7E7DD;
+}
+
+.path-local-mediaserver-guide .program .title,
+.path-local-mediaserver-guide .program .series {
+    clear: left;
+    text-align: center;
+    font-weight: bold;
+}
+
+.path-local-mediaserver-guide .program .program-info {
+    list-style: circle inside none;
+    margin: 2px 2px 2px 8px;
+}
+
+.path-local-mediaserver-guide .program .program-info li {
+    white-space: nowrap;
+    overflow: hidden;
+    padding-left: 1px;
+}
+
+.path-local-mediaserver-guide .program .program-description {
+    clear: left;
+}
+
+.path-local-mediaserver-guide .program .title .highlight {
+    background-color: inherit !important; 
+}
+
+.path-local-mediaserver-guide .program .highlight {
+    color: #000;
+    padding: 0 2px;
+    border-bottom: 1px dotted #555;
+}
+
+.path-local-mediaserver-guide .program .program-popup {
+    padding: 4px !important;
+}
+
+.path-local-mediaserver-guide .program .program-popup a {
+    border-bottom: 0;
+}
+
+.path-local-mediaserver-guide .program .program-actions {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    text-align: center;
+    display: block;
+    background-color: #FFF;
+    border: 1px solid #999;
+    border-radius: 4px;
+}
+
+.path-local-mediaserver-guide .program .program-actions li {
+    display: inline-block;
+}
+
+.path-local-mediaserver-guide .program .program-actions .singlebutton,
+.path-local-mediaserver-guide .program .program-actions .singlebutton div {
+    margin: 0;
+}
+
+.path-local-mediaserver-guide .program .program-actions input[type="submit"] {
+    margin: 6px 0;
+}
+
+.path-local-mediaserver-guide .program-old {
+    color: #555;
+}
+
+/* Media guide programs */
+.path-local-mediaserver-guide .program-recorded .title,
+.path-local-mediaserver-guide #block_fake_today .program-recorded,
+#page-local-mediaserver-guide-index .guide-row .program-recorded {
+    color: #FFF;
+    background-color: #F19595 !important;
+}
+
+.path-local-mediaserver-guide .program-favourite .title,
+.path-local-mediaserver-guide #block_fake_today .program-favourite,
+#page-local-mediaserver-guide-index .guide-row .program-favourite {
+    background-color: #D3EC8F !important;
+}
+
+.path-local-mediaserver-guide .program-series .title,
+#page-local-mediaserver-guide-index .guide-row .program-series {
+    background-color: #F5D49A !important;
+}
+
+/* Media guide */
+
+#page-local-mediaserver-guide-index .guide-row {
+    border: 1px solid #999;
+    border-bottom-width: 0;
+    background-color: #E7E7DD;
+    list-style: none;
+    position: relative;
+    width: 769px;
+    margin: 0 auto;
+}
+
+#page-local-mediaserver-guide-index .guide-row li:not(.icon) {
+    background-color: #F3F4E6;
+}
+
+#page-local-mediaserver-guide-index .guide-row li {
+    border-left: 1px solid #999;
+    border-right: 1px solid #999;
+    display: inline-block;
+    overflow: hidden;
+    height: inherit;
+    margin: 0;
+}
+
+#page-local-mediaserver-guide-index .guide-time {
+    height: 22px;
+}
+
+#page-local-mediaserver-guide-index .guide-time li {
+    position: relative;
+    float: left;
+    width: 4.16%;
+    border: 0;
+}
+
+#page-local-mediaserver-guide-index .guide-time li a {
+    display: block;
+    text-align: center;
+    height: 20px;
+}
+
+#page-local-mediaserver-guide-index .guide-time .hour-selected {
+    font-weight: bold;
+    border: 1px dotted #999;
+}
+
+#page-local-mediaserver-guide-index .guide-channel {
+    height: 44px;
+}
+
+#page-local-mediaserver-guide-index .guide-channel li {
+    position: absolute;
+    padding: 0 4px;
+}
+
+#page-local-mediaserver-guide-index .guide-channel li a {
+    color: inherit;
+    border-bottom: 1px dotted #999;
+    text-decoration: none;
+}
+
+#page-local-mediaserver-guide-index .guide-channel .icon {
+    width: 50px;
+    padding: 0 !important;
+    border-left: 0 !important;
+    background-color: #FFF;
+}
+
+#page-local-mediaserver-guide-index .guide-channel .icon img {
+    width: 100%;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+#page-local-mediaserver-guide-index .guide-channel .program-tiny {
+    padding: 0;
+}
+
+#page-local-mediaserver-guide-index .guide-channel:last-of-type {
+    border-bottom-width: 1px;
+    margin-bottom: 12px;
+}
+
+.path-local-mediaserver-guide #program-popup {
+    background-color: #F3F4E6;
+    border: 1px solid #999;
+    border-radius: 4px;
+    box-shadow: 1px 1px 4px #444;
+    width: 210px;
+    max-height: 200px;
+    overflow-y: auto;
+    position: absolute;
+    z-index: 1000;
+    padding: 2px 4px;
+}
+
+/* Media guide series links */
+
+.local-mediaserver-links-table .action-series .icon {
+    cursor: pointer;
+}
+
+#page-local-mediaserver-guide-links .search-button input[type="submit"] {
+    background: #FFF url([[pix:moodle|i/search]]) no-repeat 2px 2px;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    width: 18px;
+    height: 18px;
+}
+
+/* Media guide search */
+
+#page-local-mediaserver-guide-search #fgroup_id_genre span {
+    white-space: nowrap;
+    margin-left: 2px;
+}
+
+#page-local-mediaserver-guide-search #fgroup_id_genre span input[type="checkbox"] {
+    margin-right: 3px;
+}
+
+#page-local-mediaserver-guide-search .alert {
+    margin-top: 12px;
+}
+
+/* Media guide my channels */
+
+#page-local-mediaserver-guide-mychannels .channels-choose {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#page-local-mediaserver-guide-mychannels .channels-choose li {
+    float: left;
+    border: 1px solid #999;
+    padding: 2px;
+    margin: 3px;
+}
+
+#page-local-mediaserver-guide-mychannels .continuebutton {
+    clear: left;
+    padding-top: 10px;
+}
+
+#page-local-mediaserver-guide-week #week-heading {
+    text-align: center;
+}
+
+#page-local-mediaserver-guide-week #week-heading a {
+    margin: 0 6px;
+    text-decoration: none;
+}

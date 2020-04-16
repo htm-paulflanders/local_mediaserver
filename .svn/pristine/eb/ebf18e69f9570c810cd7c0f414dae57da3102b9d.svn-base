@@ -1,0 +1,302 @@
+<?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+defined('MOODLE_INTERNAL') || die();
+
+/**
+ * Custom URL handling class that supports the plugin appearing outside its real location
+ * Preserve for backwards compatibility until all code is using the autoloaded class
+ */
+class local_mediaserver_url extends \local_mediaserver\url {
+
+}
+
+/**
+ * Puts Media Server into the global navigation tree
+ *
+ * @param global_navigation $navigation the navigation tree instance
+ * @category navigation
+ */
+function local_mediaserver_extend_navigation(global_navigation $navigation) {
+    $context = context_system::instance();
+
+    if (has_capability('local/mediaserver:view', $context)) {
+        // Get the root 'site' node.
+        $rootnode = $navigation->find('site', navigation_node::TYPE_ROOTNODE);
+
+        // Add Media server container.
+        $text = get_string('pluginname', 'local_mediaserver');
+        $icon = new pix_icon('icon', $text, 'local_mediaserver');
+
+        $container = $rootnode->add($text, new local_mediaserver_url('/local/mediaserver/index.php'), navigation_node::TYPE_CONTAINER, null, null, $icon);
+        $container->showinflatnavigation = true;
+
+        // Expand container for users who can add content.
+        if ($usercanaddcontent = has_capability('local/mediaserver:add', $context)) {
+            $branch = $container->add(get_string('addcontent', 'local_mediaserver'), null, navigation_node::TYPE_CONTAINER);
+
+            $branch->add(get_string('sourceurl', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/admin/media_edit.php'));
+            $branch->add(get_string('sourceupload', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/admin/upload.php'));
+            $branch->add(get_string('queue', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/admin/queue.php'));
+        }
+
+        // Expand container for users who can view EPG.
+        if (has_capability('local/mediaserver:viewepg', $context)) {
+            $branch = $container->add(get_string('sourceepg', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/guide/index.php'),
+                navigation_node::TYPE_CONTAINER, null, 'epg');
+
+            if (has_capability('local/mediaserver:channels', $context)) {
+                $branch->add(get_string('channels', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/guide/channels.php'));
+            }
+
+            $branch->add(get_string('thisweek', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/guide/week.php'));
+            $branch->add(get_string('favourites', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/guide/favourites.php'));
+
+            if ($usercanaddcontent) {
+                $branch->add(get_string('recordseries', 'local_mediaserver'), new local_mediaserver_url('/local/mediaserver/guide/links.php'));
+            }
+        }
+    }
+}
+
+/**
+ * Check that RSS feeds are enabled for the site
+ *
+ * @param environment_results $result
+ * @return environment_results updated results object, or null if this test is not relevant
+ */
+function local_mediaserver_environment_rss(environment_results $result) {
+    global $CFG;
+
+    if (isset($CFG->enablerssfeeds) && $CFG->enablerssfeeds) {
+        return null;
+    }
+
+    // Only display anything if the admins need to be aware of the problem.
+    $result->setInfo(get_string('enablerssfeeds', 'admin'));
+    $result->setStatus(false);
+
+    return $result;
+}
+
+/**
+ * Check that web service is correctly configured
+ *
+ * @param environment_results $result
+ * @return environment_results updated results object, or null if this test is not relevant
+ */
+function local_mediaserver_environment_web_service(environment_results $result) {
+    global $CFG, $DB;
+
+    if (during_initial_install()) {
+        return null;
+    }
+
+    if ($CFG->enablewebservices) {
+        $serviceid = $DB->get_field('external_services', 'id',
+            array('component' => 'local_mediaserver', 'shortname' => 'local_mediaserver_ws', 'enabled' => 1));
+
+        $hostrestriction = get_config('local_mediaserver', 'host');
+        $iprestriction = gethostbyname($hostrestriction);
+
+        $sql = 'SELECT su.id
+                  FROM {external_services_users} su
+                  JOIN {external_tokens} t ON t.externalserviceid = su.externalserviceid AND t.userid = su.userid
+                 WHERE su.externalserviceid = :serviceid AND t.iprestriction = :iprestriction';
+
+        if ($DB->record_exists_sql($sql, array('serviceid' => $serviceid, 'iprestriction' => $iprestriction))) {
+            return null;
+        }
+    }
+
+    // If we reach here, we've failed.
+    $result->setInfo(get_string('webservicenotconfigured', 'local_mediaserver'));
+    $result->setStatus(false);
+
+    return $result;
+}
+
+/**
+ * Implements callback user_preferences, whitelists preferences that users are allowed to update directly
+ *
+ * @return array
+ */
+function local_mediaserver_user_preferences() {
+    $preferences = array(
+        'local_mediaserver_channels' => array('type' => PARAM_SEQUENCE, 'null' => NULL_NOT_ALLOWED, 'default' => 0),
+    );
+
+    return $preferences;
+}
+
+/**
+ * Permission checks to determine whether user can post/view plugin comments
+ *
+ * @param stdClass $options
+ * @return array
+ *
+ * @throws comment_exception
+ */
+function local_mediaserver_comment_permissions(stdClass $options) {
+    global $DB;
+
+    // Check stream comments flag (will be false for invalid stream id).
+    $enabled = $DB->get_field('local_mediaserver_stream', 'comments', array('id' => $options->itemid), IGNORE_MISSING);
+    if ($enabled === false) {
+        throw new comment_exception('invaliditemid');
+    }
+
+    return array('post' => $enabled, 'view' => $enabled);
+}
+
+/**
+ * Validate comment options before performing other comments actions
+ *
+ * @param stdClass $options
+ * @return bool
+ *
+ * @throws comment_exception
+ */
+function local_mediaserver_comment_validate(stdClass $options) {
+    global $DB;
+
+    if ($options->context->contextlevel != CONTEXT_SYSTEM) {
+        throw new comment_exception('invalidcontext');
+    }
+
+    if ($options->commentarea != 'stream') {
+        throw new comment_exception('invalidcommentarea');
+    }
+
+    if (! $DB->record_exists('local_mediaserver_stream', array('id' => $options->itemid, 'comments' => 1))) {
+        throw new comment_exception('invaliditemid');
+    }
+
+    // Validation for comment deletion, make sure it belongs to the same stream.
+    if (! empty($options->commentid)) {
+        $params = [
+            'id' => $options->commentid,
+            'contextid' => $options->context->id,
+            'component' => 'local_mediaserver',
+            'commentarea' => $options->commentarea,
+            'itemid' => $options->itemid,
+        ];
+
+        if (! $DB->record_exists('comments', $params)) {
+            throw new comment_exception('invalidcommentid');
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Serves files stored by the plugin
+ *
+ * @param stdClass $course course object
+ * @param stdClass $cm course module object
+ * @param stdClass $context context object
+ * @param string $filearea file area
+ * @param array $args extra arguments
+ * @param bool $forcedownload whether or not force download
+ * @param array $options additional options affecting the file serving
+ * @return bool false if file not found, does not return if found - justsend the file
+ */
+function local_mediaserver_pluginfile($course, $cm, $context, $filearea, $args, $forcedownload, array $options=array()) {
+    global $DB, $USER;
+
+    if ($context->contextlevel != CONTEXT_SYSTEM) {
+        return false;
+    }
+
+    require_login(SITEID, false);
+
+    if (! has_capability('local/mediaserver:view', $context)) {
+        return false;
+    }
+
+    // File area must contain a real area.
+    $fileareas = local_mediaserver_get_file_areas($course, $cm, $context);
+    if (! array_key_exists($filearea, $fileareas)) {
+        return false;
+    }
+
+    // Extract required data from $args parameter.
+    if (count($args) != 2) {
+        return false;
+    }
+    list($id, $filename) = $args;
+
+    switch ($filearea) {
+        case 'channel' :
+            if (! $DB->record_exists('local_mediaserver_channel', array('id' => $id))) {
+                return false;
+            }
+        break;
+        case 'frame' :
+            if (! $DB->record_exists('local_mediaserver_stream', array('id' => $id, 'done' => 1))) {
+                return false;
+            }
+        break;
+        case 'upload' :
+            $params = array('id' => $id, 'source' => 'upload');
+
+            // Users without the 'reports' capability can only see their own queued items.
+            if (! has_capability('local/mediaserver:reports', $context)) {
+                $params['userid'] = $USER->id;
+            }
+
+            if (! $DB->record_exists('local_mediaserver_stream', $params)) {
+                return false;
+            }
+        break;
+    }
+
+    // Retrieve the file from the Files API.
+    $fs = get_file_storage();
+    if (! $file = $fs->get_file($context->id, 'local_mediaserver', $filearea, $id, '/', $filename) or $file->is_directory()) {
+        return false;
+    }
+
+    // Finally send the file.
+    \core\session\manager::write_close();
+    send_stored_file($file, 0, 0, true, $options);
+}
+
+/**
+ * Lists all browsable file areas
+ *
+ * @param stdClass $course course object
+ * @param stdClass $cm course module object
+ * @param stdClass $context context object
+ * @return array
+ */
+function local_mediaserver_get_file_areas($course, $cm, $context) {
+    $fileareas = array(
+        'channel' => get_string('channels', 'local_mediaserver'),
+        'frame'   => get_string('frames', 'local_mediaserver'),
+        'upload'  => get_string('sourceupload', 'local_mediaserver'),
+    );
+
+    return $fileareas;
+}

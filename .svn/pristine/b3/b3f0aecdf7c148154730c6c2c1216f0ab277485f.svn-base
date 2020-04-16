@@ -1,0 +1,10 @@
+{
+    "name": "moodle-local_mediaserver-player",
+    "builds": {
+        "moodle-local_mediaserver-player": {
+            "jsfiles": [
+                "player.js"
+            ]
+        }
+    }
+}

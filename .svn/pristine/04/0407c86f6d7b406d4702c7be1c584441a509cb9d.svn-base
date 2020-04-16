@@ -1,0 +1,127 @@
+YUI.add('moodle-local_mediaserver-series', function (Y, NAME) {
+
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+/**
+ * @package    local_mediaserver
+ * @copyright  2013 Paul Holden (pholden@greenhead.ac.uk)
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @id         $Id$
+ */
+
+M.local_mediaserver = M.local_mediaserver || {};
+
+var SERIES_NAME = 'Series',
+    SERIES;
+
+SERIES = function() {
+    SERIES.superclass.constructor.apply(this, arguments);
+};
+
+Y.extend(SERIES, Y.Base, {
+    /** Element selectors. */
+    SELECTORS: {
+        ACTION: '.table-programs .action-icon',
+        ICON:   '.iconstate'
+    },
+
+    /** Element classes. */
+    CSS: {
+        DIMMED: 'dimmed_text'
+    },
+
+    /** Icon resources. */
+    RESOURCES: {
+        ICONSHOW: M.util.image_url('t/show', 'core'),
+        ICONHIDE: M.util.image_url('t/hide', 'core')
+    },
+
+    /** Script that handles AJAX requests. */
+    AJAX_HANDLER: M.cfg.wwwroot + '/local/mediaserver/guide/links_ajax.php',
+
+    /** Initialize series links UI. */
+    initializer: function() {
+        Y.one('body').delegate('click', this.toggle, this.SELECTORS.ACTION + ' ' + this.SELECTORS.ICON, this);
+
+        // Remove the icon links.
+        Y.all(this.SELECTORS.ACTION).removeAttribute('href');
+    },
+
+    /** Click event handler for icons. */
+    toggle: function(event) {
+        var icon = event.target,
+            postdata;
+
+        event.halt();
+
+        /*jslint bitwise: true */
+        postdata = {
+            'id': parseInt(icon.getData('id'), 10),
+            'finished': parseInt(icon.getData('state'), 10) ^ 1,
+            'sesskey': M.cfg.sesskey
+        };
+
+        // Create AJAX request to toggle series state.
+        Y.io(this.AJAX_HANDLER, {
+            method: 'POST',
+            data: postdata,
+            context: this,
+            on: {
+                success: function(transaction, response) {
+                    var data = Y.JSON.parse(response.responseText);
+
+                    // Make sure AJAX handler really returned a successful response.
+                    if (data.hasOwnProperty('success') && data.success === true) {
+                        this.toggle_state(icon, postdata.finished);
+                    }
+                }
+            }
+        });
+    },
+
+    /** Toggle icon state on successful AJAX request. */
+    toggle_state: function(icon, state) {
+        var row = icon.ancestor('tr');
+
+        if (state === 0) {
+            row.removeClass(this.CSS.DIMMED);
+
+            icon.setAttrs({
+                'src': this.RESOURCES.ICONHIDE,
+                'title': M.util.get_string('disable', 'moodle')
+            });
+        } else {
+            row.addClass(this.CSS.DIMMED);
+
+            icon.setAttrs({
+                'src': this.RESOURCES.ICONSHOW,
+                'title': M.util.get_string('enable', 'moodle')
+            });
+        }
+
+        icon.setData('state', state);
+    }
+}, {
+    NAME: SERIES_NAME,
+    ATTRS: {}
+});
+
+M.local_mediaserver.series = function(config) {
+    return new SERIES(config);
+};
+
+
+}, '@VERSION@', {"requires": ["base", "node", "node-event-delegate", "io", "json-parse"]});

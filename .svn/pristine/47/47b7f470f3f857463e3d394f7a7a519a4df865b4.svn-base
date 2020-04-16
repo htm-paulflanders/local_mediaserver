@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<libraries>
+  <library>
+    <name>Flowplayer RTMP Plugin</name>
+    <version>3.2.13</version>
+    <location>yui/src/player/assets/flowplayer.rtmp-*</location>
+    <license>MIT</license>
+  </library>
+</libraries>
